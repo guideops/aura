@@ -17,11 +17,23 @@
   #panel .row { display:flex; justify-content:space-between; padding:2px 0; color:#3a4453; }
   #panel .row span:first-child { color:#68758a; }
   canvas { display:block; }
+  #approvals { position:fixed; bottom:12px; right:12px; width:320px; display:flex; flex-direction:column; gap:8px; }
+  .ar { background:#fffdf7; border:1px solid #f0d9a8; border-left:4px solid #f59e0b; border-radius:10px;
+        padding:10px 12px; box-shadow:0 4px 14px rgba(30,40,60,.08); }
+  .ar .h { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
+  .ar .agent { font-weight:600; color:#b45309; }
+  .ar .tool { font-family:ui-monospace, monospace; font-size:11px; color:#3a4453; word-break:break-all; }
+  .ar .reason { font-size:11px; color:#68758a; margin:4px 0 8px; }
+  .ar .btns { display:flex; gap:8px; }
+  .ar button { flex:1; border:0; border-radius:7px; padding:6px 0; font-weight:600; cursor:pointer; font-size:12px; }
+  .ar .approve { background:#16a34a; color:#fff; }
+  .ar .deny { background:#e5e7eb; color:#374151; }
 </style>
 </head>
 <body>
 <div id="hud"><b>AURA</b> <span class="dim" id="conn">loading assets…</span><div class="dim" id="count"></div></div>
 <div id="panel"></div>
+<div id="approvals"></div>
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
@@ -168,6 +180,7 @@ function buildKanban() {
   }
   return S(g);
 }
+const gateLamps = [];
 function buildGate() {
   const g = new THREE.Group();
   for (const dz of [-0.55, 0.55]) {
@@ -175,10 +188,14 @@ function buildGate() {
     pillar.position.set(0, 0.58, dz); g.add(pillar);
     const lamp = box(0.34, 0.05, 0.1, new THREE.MeshBasicMaterial({ color: 0x34d399 }));
     lamp.position.set(0, 1.18, dz); g.add(lamp);
+    gateLamps.push(lamp);
   }
   const flap = box(0.05, 0.5, 0.6, M(GLASS_C, { transparent: true, opacity: 0.6, roughness: 0.1 }));
   flap.position.set(0, 0.75, 0); g.add(flap);
   return S(g);
+}
+function setGateAlarm(on) {
+  for (const lamp of gateLamps) lamp.material.color.setHex(on ? 0xef4444 : 0x34d399);
 }
 function addProcedural(build, pos, rotY, label) {
   const g = build();
@@ -345,6 +362,32 @@ addEventListener("pointerdown", (e) => {
   } else panel.style.display = "none";
 });
 
+// ---------- approvals ----------
+const approvals = new Map();
+const approvalsEl = document.getElementById("approvals");
+function renderApprovals() {
+  approvalsEl.innerHTML = "";
+  for (const r of approvals.values()) {
+    const el = document.createElement("div");
+    el.className = "ar";
+    el.innerHTML = `<div class="h"><span class="agent">${r.agentId}</span><span class="tool">${r.tool}</span></div>
+      <div class="tool">${(r.inputPreview || "").slice(0, 90)}</div>
+      <div class="reason">${r.reason} · impact: ${r.impact}</div>
+      <div class="btns"><button class="approve">Approve &amp; Execute</button><button class="deny">Deny</button></div>`;
+    el.querySelector(".approve").onclick = () => resolveApproval(r.id, true);
+    el.querySelector(".deny").onclick = () => resolveApproval(r.id, false);
+    approvalsEl.appendChild(el);
+  }
+  setGateAlarm(approvals.size > 0);
+}
+async function resolveApproval(id, approved) {
+  approvals.delete(id); renderApprovals();
+  await fetch(`/api/approvals/${id}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ approved }),
+  }).catch(() => {});
+}
+
 // ---------- live data ----------
 const connEl = document.getElementById("conn");
 const countEl = document.getElementById("count");
@@ -354,8 +397,13 @@ function connect() {
   ws.onclose = () => { connEl.textContent = "reconnecting…"; setTimeout(connect, 1500); };
   ws.onmessage = (m) => {
     const msg = JSON.parse(m.data);
-    if (msg.kind === "hello") msg.agents.forEach(ensureAgent);
-    else if (msg.kind === "snapshot") ensureAgent(msg.agent);
+    if (msg.kind === "hello") {
+      msg.agents.forEach(ensureAgent);
+      (msg.approvals || []).forEach((r) => approvals.set(r.id, r));
+      renderApprovals();
+    } else if (msg.kind === "snapshot") ensureAgent(msg.agent);
+    else if (msg.kind === "approval.pending") { approvals.set(msg.request.id, msg.request); renderApprovals(); }
+    else if (msg.kind === "approval.resolved") { approvals.delete(msg.id); renderApprovals(); }
     countEl.textContent = `${agents.size} agents`;
   };
 }

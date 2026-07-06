@@ -101,6 +101,7 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
         JSON.stringify({
           kind: "hello",
           agents: store.list(),
+          approvals: guardrails.pendingRequests,
           serverVersion: SERVER_VERSION,
         } satisfies ServerMessage),
       );
@@ -147,6 +148,9 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
             });
             bus.emit(event);
             bus.emit(gateEvent);
+            if (decision.action === "ask" && decision.request) {
+              broadcast({ kind: "approval.pending", request: decision.request });
+            }
             // Claude Code PreToolUse hook contract: non-empty JSON decision
             return reply.send({
               hookSpecificOutput: {
@@ -185,6 +189,18 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     const { approved } = (req.body ?? {}) as { approved?: boolean };
     const resolved = guardrails.resolve(id, approved === true);
     if (!resolved) return reply.code(404).send({ error: "not pending" });
+    broadcast({ kind: "approval.resolved", id, status: resolved.status });
+    // Unblock the agent in the visual layer (real retry happens agent-side).
+    bus.emit({
+      id: ulid(),
+      ts: Date.now(),
+      provider: "claude-code",
+      sessionId: resolved.sessionId,
+      agentId: resolved.agentId,
+      type: "agent.status",
+      summary: `gate ${resolved.status} — ${resolved.tool}`,
+      data: { status: approved === true ? "active" : "idle" },
+    });
     return reply.send({ request: resolved });
   });
   app.get("/api/health", async () => ({ ok: true, version: SERVER_VERSION }));

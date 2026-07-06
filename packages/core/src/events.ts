@@ -83,11 +83,20 @@ export const AgentSnapshot = z.object({
 });
 export type AgentSnapshot = z.infer<typeof AgentSnapshot>;
 
+import { ActionRequest } from "./permissions.js";
+
 /** Messages the daemon broadcasts to renderers over WebSocket. */
 export const ServerMessage = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("hello"), agents: z.array(AgentSnapshot), serverVersion: z.string() }),
+  z.object({
+    kind: z.literal("hello"),
+    agents: z.array(AgentSnapshot),
+    approvals: z.array(ActionRequest).default([]),
+    serverVersion: z.string(),
+  }),
   z.object({ kind: z.literal("event"), event: AgentEvent }),
   z.object({ kind: z.literal("snapshot"), agent: AgentSnapshot }),
   z.object({ kind: z.literal("agent.removed"), agentId: z.string() }),
+  z.object({ kind: z.literal("approval.pending"), request: ActionRequest }),
+  z.object({ kind: z.literal("approval.resolved"), id: z.string(), status: z.string() }),
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;
