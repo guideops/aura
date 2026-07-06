@@ -1,4 +1,4 @@
-# Bullpen guardrails — first matching rule wins; default applies otherwise.
+# AURA guardrails — first matching rule wins; default applies otherwise.
 version: 1
 default: allow
 rules:

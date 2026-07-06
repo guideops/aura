@@ -1,5 +1,5 @@
 {
-  "name": "bullpen",
+  "name": "aura",
   "private": true,
   "version": "0.1.0",
   "packageManager": "pnpm@10.33.2",
@@ -8,7 +8,7 @@
     "build": "turbo run build",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
-    "dev": "pnpm --filter @bullpen/daemon dev"
+    "dev": "pnpm --filter @aura/daemon dev"
   },
   "devDependencies": {
     "turbo": "^2.5.0",

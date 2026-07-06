@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import type { AgentEvent } from "@bullpen/core";
+import type { AgentEvent } from "@aura/core";
 
 /** Append-only event log. State is derived; events are the record. */
 export class EventLog {

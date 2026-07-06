@@ -1,6 +1,6 @@
 /**
  * Generates the hooks block for a project's .claude/settings.json so a
- * Claude Code session POSTs lifecycle events to the Bullpen daemon.
+ * Claude Code session POSTs lifecycle events to the AURA daemon.
  * curl is used because hook commands run in the user's shell on all OSes;
  * on Windows, Claude Code executes hooks via cmd/PowerShell where curl.exe
  * ships with the OS (Win10+).

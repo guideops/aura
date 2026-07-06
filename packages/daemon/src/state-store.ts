@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentSnapshot, AgentStatus } from "@bullpen/core";
+import type { AgentEvent, AgentSnapshot, AgentStatus } from "@aura/core";
 
 const AGENT_COLORS = ["blue", "green", "orange", "purple", "red", "yellow"] as const;
 

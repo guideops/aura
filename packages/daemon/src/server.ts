@@ -5,8 +5,8 @@ import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import { ulid } from "ulid";
 import type { WebSocket } from "ws";
-import { AgentEvent, type ServerMessage } from "@bullpen/core";
-import { normalizeHookEvent } from "@bullpen/adapter-claude-code";
+import { AgentEvent, type ServerMessage } from "@aura/core";
+import { normalizeHookEvent } from "@aura/adapter-claude-code";
 import { EventBus } from "./event-bus.js";
 import { AgentStateStore } from "./state-store.js";
 import { EventLog } from "./persistence.js";
@@ -25,15 +25,18 @@ export interface Daemon {
   store: AgentStateStore;
   log: EventLog;
   guardrails: GuardrailEngine;
+  /** Sessions currently streaming via hooks; transcript watcher defers to these. */
+  hookSessions: Set<string>;
 }
 
 export function createDaemon(options: DaemonOptions = {}): Daemon {
   const app = Fastify({ logger: false });
   const bus = new EventBus();
   const store = new AgentStateStore();
-  const log = new EventLog(options.dbPath ?? "bullpen.db");
+  const log = new EventLog(options.dbPath ?? "aura.db");
   const guardrails = new GuardrailEngine();
   const sockets = new Set<WebSocket>();
+  const hookSessions = new Set<string>();
 
   const broadcast = (msg: ServerMessage) => {
     const text = JSON.stringify(msg);
@@ -74,6 +77,7 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     if (provider === "claude-code") {
       const event = normalizeHookEvent(req.body, store);
       if (event) {
+        hookSessions.add(event.sessionId);
         // Guardrail check on tool.use
         if (event.type === "tool.use") {
           const decision = guardrails.evaluate({
@@ -144,7 +148,7 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
   });
   app.get("/api/health", async () => ({ ok: true, version: SERVER_VERSION }));
 
-  return { app, bus, store, log, guardrails };
+  return { app, bus, store, log, guardrails, hookSessions };
 }
 
 export function defaultPublicDir(): string {

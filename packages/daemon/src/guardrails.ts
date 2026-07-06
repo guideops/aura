@@ -1,6 +1,6 @@
 import { ulid } from "ulid";
 import { parse as parseYaml } from "yaml";
-import { PermissionsFile, type ActionRequest, type RuleAction } from "@bullpen/core";
+import { PermissionsFile, type ActionRequest, type RuleAction } from "@aura/core";
 
 export interface GuardrailDecision {
   action: RuleAction;

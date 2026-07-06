@@ -1,6 +1,6 @@
 import { ulid } from "ulid";
 import { z } from "zod";
-import type { AgentEvent } from "@bullpen/core";
+import type { AgentEvent } from "@aura/core";
 
 /**
  * Claude Code hook payload (subset we consume). Schema is Anthropic-internal

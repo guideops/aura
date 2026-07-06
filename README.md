@@ -1,4 +1,4 @@
-# Bullpen
+# AURA — Agentic Unified Resource Architecture
 
 Visual office for AI agents. Your coding agents become characters in an isometric office —
 desks are running sessions, the kanban wall syncs GitHub Projects, the security gate is a real
@@ -22,7 +22,7 @@ node packages/daemon/dist/cli.js   # http://127.0.0.1:8311
 ```
 
 Open `http://127.0.0.1:8311` for the live debug console. Point a Claude Code project at the
-daemon by adding the hooks block from `@bullpen/adapter-claude-code` `hooksConfig()` to the
+daemon by adding the hooks block from `@aura/adapter-claude-code` `hooksConfig()` to the
 project's `.claude/settings.json`.
 
 Guardrails: put a `permissions.yaml` next to the daemon working dir (see repo root example).

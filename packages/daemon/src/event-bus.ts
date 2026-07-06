@@ -1,4 +1,4 @@
-import type { AgentEvent } from "@bullpen/core";
+import type { AgentEvent } from "@aura/core";
 
 export type EventHandler = (event: AgentEvent) => void;
 

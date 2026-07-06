@@ -1,8 +1,8 @@
 {
   "description": "Recorded Claude Code hook payload shapes — replayed in daemon tests. Order matters.",
   "payloads": [
-    { "hook_event_name": "SessionStart", "session_id": "sess-aaa11111", "cwd": "C:\\work\\bullpen" },
-    { "hook_event_name": "PreToolUse", "session_id": "sess-aaa11111", "tool_name": "Read", "tool_input": { "file_path": "C:\\work\\bullpen\\README.md" } },
+    { "hook_event_name": "SessionStart", "session_id": "sess-aaa11111", "cwd": "C:\\work\\aura" },
+    { "hook_event_name": "PreToolUse", "session_id": "sess-aaa11111", "tool_name": "Read", "tool_input": { "file_path": "C:\\work\\aura\\README.md" } },
     { "hook_event_name": "PostToolUse", "session_id": "sess-aaa11111", "tool_name": "Read" },
     { "hook_event_name": "PreToolUse", "session_id": "sess-aaa11111", "tool_name": "Bash", "tool_input": { "command": "pnpm test --silent" } },
     { "hook_event_name": "PostToolUse", "session_id": "sess-aaa11111", "tool_name": "Bash" },

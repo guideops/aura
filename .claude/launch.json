@@ -2,7 +2,7 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "bullpen-daemon",
+      "name": "aura-daemon",
       "runtimeExecutable": "node",
       "runtimeArgs": ["packages/daemon/dist/cli.js"],
       "port": 8311
