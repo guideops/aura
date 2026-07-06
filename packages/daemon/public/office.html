@@ -275,6 +275,22 @@ function buildRobotFallback(color) {
 const agents = new Map();
 function agentColor(agentId) { return COLORS[agentId.split("-")[0]] ?? 0x64748b; }
 
+// True posed height of a skinned rig, from bone world positions.
+const _bonePos = new THREE.Vector3();
+function skeletonHeight(group) {
+  let minY = Infinity, maxY = -Infinity;
+  group.traverse((o) => {
+    if (o.isSkinnedMesh && o.skeleton) {
+      for (const bone of o.skeleton.bones) {
+        _bonePos.setFromMatrixPosition(bone.matrixWorld);
+        if (_bonePos.y < minY) minY = _bonePos.y;
+        if (_bonePos.y > maxY) maxY = _bonePos.y;
+      }
+    }
+  });
+  return maxY > minY ? maxY - minY : 0;
+}
+
 let deskCursor = 0, gateCursor = 0, loungeCursor = 0;
 function slotFor(a, entry) {
   switch (a.status) {
@@ -312,22 +328,26 @@ function ensureAgent(a) {
       if (walk) { actions.walk = mixer.clipAction(walk); }
       if (wave) { actions.wave = mixer.clipAction(wave); actions.wave.loop = THREE.LoopOnce; }
       actions.idle?.play();
-      // Normalize height AFTER the pose settles: bind the skeleton, sample one
-      // frame of idle, and update world matrices so the bbox reflects the
-      // actual on-screen mesh (setFromObject on an unposed skinned clone lies).
+      // Normalize height from the SKELETON, not a bounding box. setFromObject on
+      // a skinned mesh returns bind-pose geometry bounds (here ~150 units) while
+      // the actual rendered body is only ~3 units — that mismatch shrank robots
+      // to specks. Bone world-Y span is the true posed height.
+      group.scale.setScalar(1);
       mixer.update(0);
       group.updateWorldMatrix(true, true);
-      const measured = new THREE.Box3().setFromObject(group).getSize(new THREE.Vector3()).y;
-      const s = measured > 1e-4 ? TARGET_H / measured : 1;
+      const boneH = skeletonHeight(group);
+      // Head mesh extends ~15% above the top bone; account for it.
+      const s = boneH > 1e-3 ? TARGET_H / (boneH * 1.15) : 1;
       group.scale.setScalar(s);
+      group.userData.localTop = boneH * 1.15; // pre-scale head height for tag
     } else {
       group = buildRobotFallback(agentColor(a.agentId));
       group.scale.setScalar(TARGET_H / 1.15);
+      group.userData.localTop = 1.15;
     }
     const tag = makeLabel(a.agentId, 1.5);
-    // tag sits above the head in the group's LOCAL space (pre-scale units).
-    const preScaleH = robotTemplate ? new THREE.Box3().setFromObject(group).getSize(new THREE.Vector3()).y / group.scale.y : 1.6;
-    tag.position.y = preScaleH + 0.25;
+    // tag sits above the head in the group's LOCAL (pre-scale) space.
+    tag.position.y = (group.userData.localTop ?? 1.4) * 1.05 + 0.15;
     group.add(tag);
     group.userData.agentId = a.agentId;
     scene.add(group);
@@ -422,6 +442,11 @@ window.__aura = {
     const e = agents.get(id); if (!e) return null;
     e.group.updateWorldMatrix(true, true);
     return +new THREE.Box3().setFromObject(e.group).getSize(new THREE.Vector3()).y.toFixed(3);
+  },
+  bodyHeight(id) {
+    const e = agents.get(id); if (!e) return null;
+    e.group.updateWorldMatrix(true, true);
+    return +skeletonHeight(e.group).toFixed(3);
   },
 };
 
