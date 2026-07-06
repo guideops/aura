@@ -51,7 +51,8 @@ export class AgentStateStore {
         pendingApprovalId: null,
       } satisfies AgentSnapshot);
 
-    agent.lastEventAt = event.ts;
+    // Synthetic events (staleness sweep) must not reset the quiet timer.
+    if (event.data["synthetic"] !== true) agent.lastEventAt = event.ts;
 
     switch (event.type) {
       case "session.start": {

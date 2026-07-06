@@ -11,12 +11,14 @@ import { EventBus } from "./event-bus.js";
 import { AgentStateStore } from "./state-store.js";
 import { EventLog } from "./persistence.js";
 import { GuardrailEngine } from "./guardrails.js";
+import { SessionManager } from "./session-manager.js";
 
 const SERVER_VERSION = "0.1.0";
 
 export interface DaemonOptions {
   dbPath?: string; // ":memory:" for tests
   publicDir?: string;
+  daemonUrl?: string; // self URL injected into spawned sessions' hooks
 }
 
 export interface Daemon {
@@ -51,6 +53,33 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     broadcast({ kind: "event", event });
     if (snapshot) broadcast({ kind: "snapshot", agent: snapshot });
   });
+
+  // Staleness sweep: transcripts replay history, so old sessions arrive
+  // "active". Demote quiet agents: idle after 5 min, offline after 30.
+  const IDLE_MS = 5 * 60_000;
+  const OFFLINE_MS = 30 * 60_000;
+  const sweep = setInterval(() => {
+    const now = Date.now();
+    for (const agent of store.list()) {
+      if (agent.lastEventAt === null || agent.status === "offline") continue;
+      const quiet = now - agent.lastEventAt;
+      const next = quiet > OFFLINE_MS ? "offline" : quiet > IDLE_MS ? "idle" : null;
+      if (next && agent.status !== next && agent.status !== "blocked") {
+        bus.emit({
+          id: ulid(),
+          ts: now,
+          provider: agent.provider,
+          sessionId: agent.sessionId,
+          agentId: agent.agentId,
+          type: "agent.status",
+          summary: `agent.${next} — no activity ${Math.round(quiet / 60_000)}m`,
+          data: { status: next, synthetic: true },
+        });
+      }
+    }
+  }, 30_000);
+  sweep.unref?.();
+  app.addHook("onClose", async () => clearInterval(sweep));
 
   void app.register(websocket);
   void app.register(async (instance) => {
@@ -147,6 +176,29 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     return reply.send({ request: resolved });
   });
   app.get("/api/health", async () => ({ ok: true, version: SERVER_VERSION }));
+
+  // Managed sessions (assign-card → spawn flow lands on this).
+  const sessions = new SessionManager(
+    options.daemonUrl ?? `http://127.0.0.1:${process.env["AURA_PORT"] ?? 8311}`,
+  );
+  app.get("/api/sessions", async () => ({ sessions: sessions.list() }));
+  app.post("/api/sessions", async (req, reply) => {
+    const body = (req.body ?? {}) as { cwd?: string; prompt?: string; model?: string };
+    if (!body.cwd || !body.prompt) {
+      return reply.code(400).send({ error: "cwd and prompt required" });
+    }
+    const spawnInput: { cwd: string; prompt: string; model?: string } = {
+      cwd: body.cwd,
+      prompt: body.prompt,
+    };
+    if (body.model) spawnInput.model = body.model;
+    return reply.send({ session: sessions.spawn(spawnInput) });
+  });
+  app.delete("/api/sessions/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!sessions.stop(id)) return reply.code(404).send({ error: "not running" });
+    return reply.send({ ok: true });
+  });
 
   return { app, bus, store, log, guardrails, hookSessions };
 }
