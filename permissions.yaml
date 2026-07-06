@@ -1,0 +1,14 @@
+# Bullpen guardrails — first matching rule wins; default applies otherwise.
+version: 1
+default: allow
+rules:
+  - tool: Bash
+    match: "rm -rf|rmdir /s|del /f"
+    action: deny
+    reason: destructive delete blocked
+  - tool: Bash
+    match: "git push --force"
+    action: ask
+    reason: force push needs operator approval
+  - tool: WebFetch
+    action: allow
