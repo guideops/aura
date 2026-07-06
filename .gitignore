@@ -8,3 +8,5 @@ assets/raw/
 vault/briefs/
 *.board.db
 *.board.db-*
+*.sync.db
+*.sync.db-*

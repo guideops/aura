@@ -15,6 +15,8 @@ import { SessionManager } from "./session-manager.js";
 import { Vault } from "./vault.js";
 import { writeBrief } from "./brief.js";
 import { Board } from "./board.js";
+import { SyncEngine, type ConflictReport } from "./github-sync.js";
+import { OctokitProjectClient } from "./github-client.js";
 import type { BoardMessage } from "@aura/core";
 
 const SERVER_VERSION = "0.1.0";
@@ -310,7 +312,47 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     return reply.send({ card: updated, session });
   });
 
-  app.addHook("onClose", async () => { vault.close(); board.close(); });
+  // GitHub Projects v2 sync. Token held in memory only — NEVER persisted here;
+  // Electron builds inject it via OS keychain (safeStorage) at Phase 6.
+  let syncEngine: SyncEngine | null = null;
+  let lastSync: { at: number; conflicts: number; applied: number } | null = null;
+  const reviewQueue: ConflictReport[] = [];
+
+  app.get("/api/github/status", async () => ({
+    linked: syncEngine !== null,
+    lastSync,
+    reviewQueue,
+  }));
+  app.post("/api/github/link", async (req, reply) => {
+    const { token, projectId } = (req.body ?? {}) as { token?: string; projectId?: string };
+    if (!token || !projectId) return reply.code(400).send({ error: "token and projectId required" });
+    syncEngine?.close();
+    syncEngine = new SyncEngine(
+      board,
+      new OctokitProjectClient({ token, projectId }),
+      boardDbPath === ":memory:" ? ":memory:" : boardDbPath.replace(/\.board\.db$/, ".sync.db"),
+    );
+    return reply.send({ ok: true });
+  });
+  app.post("/api/github/sync", async (_req, reply) => {
+    if (!syncEngine) return reply.code(409).send({ error: "not linked" });
+    try {
+      const r = await syncEngine.syncOnce();
+      lastSync = { at: Date.now(), conflicts: r.conflicts.length, applied: r.applied };
+      for (const c of r.conflicts) reviewQueue.push(c);
+      // Refresh board views for anything the sync changed.
+      for (const card of board.list()) broadcast({ kind: "card.upsert", card });
+      return reply.send({ ...r });
+    } catch (err) {
+      return reply.code(502).send({ error: String((err as Error).message) });
+    }
+  });
+  app.post("/api/github/review/clear", async () => {
+    reviewQueue.length = 0;
+    return { ok: true };
+  });
+
+  app.addHook("onClose", async () => { vault.close(); board.close(); syncEngine?.close(); });
 
   return { app, bus, store, log, guardrails, vault, board, hookSessions };
 }
