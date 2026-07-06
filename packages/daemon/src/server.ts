@@ -5,7 +5,7 @@ import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import { ulid } from "ulid";
 import type { WebSocket } from "ws";
-import { AgentEvent, type ServerMessage } from "@aura/core";
+import { AgentEvent, type ServerMessage, type Card, type CardStatus } from "@aura/core";
 import { normalizeHookEvent } from "@aura/adapter-claude-code";
 import { EventBus } from "./event-bus.js";
 import { AgentStateStore } from "./state-store.js";
@@ -14,6 +14,8 @@ import { GuardrailEngine } from "./guardrails.js";
 import { SessionManager } from "./session-manager.js";
 import { Vault } from "./vault.js";
 import { writeBrief } from "./brief.js";
+import { Board } from "./board.js";
+import type { BoardMessage } from "@aura/core";
 
 const SERVER_VERSION = "0.1.0";
 
@@ -31,6 +33,7 @@ export interface Daemon {
   log: EventLog;
   guardrails: GuardrailEngine;
   vault: Vault;
+  board: Board;
   /** Sessions currently streaming via hooks; transcript watcher defers to these. */
   hookSessions: Set<string>;
 }
@@ -49,10 +52,14 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     vaultDbPath,
   );
   vault.reindex();
+  const boardDbPath = options.dbPath && options.dbPath !== ":memory:"
+    ? options.dbPath.replace(/\.db$/, "") + ".board.db"
+    : ":memory:";
+  const board = new Board(boardDbPath);
   const sockets = new Set<WebSocket>();
   const hookSessions = new Set<string>();
 
-  const broadcast = (msg: ServerMessage) => {
+  const broadcast = (msg: ServerMessage | BoardMessage) => {
     const text = JSON.stringify(msg);
     for (const ws of sockets) {
       if (ws.readyState === ws.OPEN) ws.send(text);
@@ -254,9 +261,58 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     return reply.send({ ok: true });
   });
 
-  app.addHook("onClose", async () => vault.close());
+  // Kanban board.
+  const emitCard = (card: Card) => broadcast({ kind: "card.upsert", card });
+  app.get("/api/board/cards", async () => ({ cards: board.list() }));
+  app.post("/api/board/cards", async (req, reply) => {
+    const b = (req.body ?? {}) as { title?: string; body?: string; status?: CardStatus; tags?: string[] };
+    if (!b.title) return reply.code(400).send({ error: "title required" });
+    const created: { title: string; body?: string; status?: CardStatus; tags?: string[] } = { title: b.title };
+    if (b.body !== undefined) created.body = b.body;
+    if (b.status !== undefined) created.status = b.status;
+    if (b.tags !== undefined) created.tags = b.tags;
+    const card = board.create(created);
+    emitCard(card);
+    return reply.send({ card });
+  });
+  app.patch("/api/board/cards/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const patch = (req.body ?? {}) as Record<string, unknown>;
+    const card = board.update(id, patch);
+    if (!card) return reply.code(404).send({ error: "not found" });
+    emitCard(card);
+    return reply.send({ card });
+  });
+  app.delete("/api/board/cards/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!board.remove(id)) return reply.code(404).send({ error: "not found" });
+    broadcast({ kind: "card.removed", id });
+    return reply.send({ ok: true });
+  });
+  // Assign a card to an agent and spawn a session bound to it.
+  app.post("/api/board/cards/:id/assign", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = (req.body ?? {}) as { agentId?: string; cwd?: string; model?: string };
+    const card = board.get(id);
+    if (!card) return reply.code(404).send({ error: "not found" });
+    const updated = board.update(id, {
+      assignee: b.agentId ?? card.assignee,
+      status: card.status === "backlog" ? "in_progress" : card.status,
+    });
+    if (updated) emitCard(updated);
+    let session = null;
+    if (b.cwd) {
+      const prompt = `Work on ${card.key}: ${card.title}\n\n${card.body}`.trim();
+      const spawnInput: { cwd: string; prompt: string; model?: string } = { cwd: b.cwd, prompt };
+      if (b.model) spawnInput.model = b.model;
+      session = sessions.spawn(spawnInput);
+    }
+    return reply.send({ card: updated, session });
+  });
 
-  return { app, bus, store, log, guardrails, vault, hookSessions };
+  app.addHook("onClose", async () => { vault.close(); board.close(); });
+
+  return { app, bus, store, log, guardrails, vault, board, hookSessions };
 }
 
 export function defaultPublicDir(): string {

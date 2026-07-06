@@ -6,3 +6,5 @@ dist/
 .env
 assets/raw/
 vault/briefs/
+*.board.db
+*.board.db-*

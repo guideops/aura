@@ -6,3 +6,4 @@ export { GuardrailEngine } from "./guardrails.js";
 export { Vault, type VaultNote, type VaultSearchHit } from "./vault.js";
 export { generateBrief, writeBrief } from "./brief.js";
 export { SessionManager } from "./session-manager.js";
+export { Board, type CreateCardInput } from "./board.js";

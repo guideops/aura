@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AURA — board</title>
+<style>
+  :root { color-scheme: light; --bg:#f4f6f9; --card:#fff; --line:#e3e8ef; --tx:#1f2733; --dim:#6b7688; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:13px/1.45 -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--tx); }
+  header { display:flex; align-items:center; gap:14px; padding:12px 18px; border-bottom:1px solid var(--line); background:#fff; }
+  header b { letter-spacing:.14em; }
+  header .dim { color:var(--dim); font-size:12px; }
+  header .grow { flex:1; }
+  header input { border:1px solid var(--line); border-radius:8px; padding:6px 10px; font:inherit; width:240px; }
+  header button { border:0; background:#2563eb; color:#fff; border-radius:8px; padding:7px 14px; font-weight:600; cursor:pointer; }
+  main { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; padding:16px; align-items:start; }
+  .col { background:#eef1f5; border:1px solid var(--line); border-radius:12px; padding:10px; min-height:200px; }
+  .col.drop { outline:2px dashed #2563eb; outline-offset:-4px; }
+  .col h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); margin:2px 4px 10px; display:flex; justify-content:space-between; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:9px; cursor:grab; box-shadow:0 1px 2px rgba(20,30,50,.04); }
+  .card:active { cursor:grabbing; }
+  .card .key { font-family:ui-monospace,monospace; font-size:11px; color:var(--dim); }
+  .card .title { font-weight:600; margin:2px 0 8px; }
+  .card .meta { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .tag { font-size:10px; background:#eef2ff; color:#4f46e5; border-radius:20px; padding:1px 8px; }
+  .assignee { font-size:11px; display:flex; align-items:center; gap:4px; color:var(--dim); margin-left:auto; }
+  .dot { width:9px; height:9px; border-radius:50%; display:inline-block; }
+  .bar { height:5px; background:#eef1f5; border-radius:4px; margin-top:8px; overflow:hidden; }
+  .bar > i { display:block; height:100%; background:#2563eb; }
+</style>
+</head>
+<body>
+<header>
+  <b>AURA</b><span class="dim">board · <span id="conn">connecting…</span></span>
+  <span class="grow"></span>
+  <input id="new" placeholder="New card title… (Enter)" />
+</header>
+<main id="board"></main>
+<script type="module">
+const COLS = [
+  { status: "backlog", title: "Backlog" },
+  { status: "in_progress", title: "In Progress" },
+  { status: "review", title: "Review" },
+  { status: "done", title: "Done" },
+];
+const AGENT_COLORS = { blue:"#3b82f6", green:"#22c55e", orange:"#f97316", purple:"#8b5cf6", red:"#ef4444", yellow:"#eab308" };
+const cards = new Map();
+const boardEl = document.getElementById("board");
+const connEl = document.getElementById("conn");
+
+function agentDot(assignee) {
+  if (!assignee) return "";
+  const c = AGENT_COLORS[assignee.split("-")[0]] ?? "#64748b";
+  return `<span class="assignee"><span class="dot" style="background:${c}"></span>${assignee}</span>`;
+}
+function cardHTML(c) {
+  const tags = c.tags.map((t) => `<span class="tag">${t}</span>`).join("");
+  const bar = c.progress > 0 ? `<div class="bar"><i style="width:${c.progress}%"></i></div>` : "";
+  return `<div class="card" draggable="true" data-id="${c.id}">
+    <div class="key">${c.key}</div>
+    <div class="title">${escapeHtml(c.title)}</div>
+    <div class="meta">${tags}${agentDot(c.assignee)}</div>${bar}
+  </div>`;
+}
+function escapeHtml(s){ return s.replace(/[&<>"]/g, (m)=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[m])); }
+
+function render() {
+  boardEl.innerHTML = "";
+  for (const col of COLS) {
+    const list = [...cards.values()].filter((c) => c.status === col.status);
+    const el = document.createElement("div");
+    el.className = "col"; el.dataset.status = col.status;
+    el.innerHTML = `<h2>${col.title}<span>${list.length}</span></h2>` + list.map(cardHTML).join("");
+    boardEl.appendChild(el);
+  }
+  wireDnD();
+}
+
+function wireDnD() {
+  let dragId = null;
+  for (const card of boardEl.querySelectorAll(".card")) {
+    card.addEventListener("dragstart", (e) => { dragId = card.dataset.id; e.dataTransfer.effectAllowed = "move"; });
+  }
+  for (const col of boardEl.querySelectorAll(".col")) {
+    col.addEventListener("dragover", (e) => { e.preventDefault(); col.classList.add("drop"); });
+    col.addEventListener("dragleave", () => col.classList.remove("drop"));
+    col.addEventListener("drop", async (e) => {
+      e.preventDefault(); col.classList.remove("drop");
+      if (!dragId) return;
+      const status = col.dataset.status;
+      const c = cards.get(dragId);
+      if (c && c.status !== status) {
+        c.status = status; render(); // optimistic
+        await fetch(`/api/board/cards/${dragId}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status }),
+        }).catch(() => {});
+      }
+      dragId = null;
+    });
+  }
+}
+
+document.getElementById("new").addEventListener("keydown", async (e) => {
+  if (e.key !== "Enter" || !e.target.value.trim()) return;
+  const title = e.target.value.trim(); e.target.value = "";
+  await fetch("/api/board/cards", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  }).catch(() => {});
+});
+
+async function boot() {
+  const res = await fetch("/api/board/cards").then((r) => r.json());
+  for (const c of res.cards) cards.set(c.id, c);
+  render();
+  connect();
+}
+function connect() {
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => { connEl.textContent = "live"; };
+  ws.onclose = () => { connEl.textContent = "reconnecting…"; setTimeout(connect, 1500); };
+  ws.onmessage = (m) => {
+    const msg = JSON.parse(m.data);
+    if (msg.kind === "card.upsert") { cards.set(msg.card.id, msg.card); render(); }
+    else if (msg.kind === "card.removed") { cards.delete(msg.id); render(); }
+  };
+}
+window.__auraBoard = { cards };
+boot();
+</script>
+</body>
+</html>
