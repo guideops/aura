@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { TranscriptWatcher } from "@aura/adapter-claude-code";
 import { createDaemon, defaultPublicDir } from "./server.js";
+import { writeBrief } from "./brief.js";
 
 const PORT = Number(process.env["AURA_PORT"] ?? 8311);
 const HOST = "127.0.0.1"; // local-only by design; never bind 0.0.0.0
@@ -34,6 +35,15 @@ if (process.env["AURA_WATCH"] !== "0" && fs.existsSync(transcriptsRoot)) {
   // eslint-disable-next-line no-console
   console.log(`[aura] transcript watcher on ${transcriptsRoot}`);
 }
+
+// Morning brief: write once on boot, then daily. Memory compounds.
+try {
+  writeBrief(daemon.vault, daemon.log);
+} catch { /* empty history on first boot is fine */ }
+const briefTimer = setInterval(() => {
+  try { writeBrief(daemon.vault, daemon.log); } catch { /* noop */ }
+}, 24 * 3_600_000);
+briefTimer.unref?.();
 
 daemon.app
   .listen({ port: PORT, host: HOST })

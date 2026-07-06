@@ -12,6 +12,8 @@ import { AgentStateStore } from "./state-store.js";
 import { EventLog } from "./persistence.js";
 import { GuardrailEngine } from "./guardrails.js";
 import { SessionManager } from "./session-manager.js";
+import { Vault } from "./vault.js";
+import { writeBrief } from "./brief.js";
 
 const SERVER_VERSION = "0.1.0";
 
@@ -19,6 +21,7 @@ export interface DaemonOptions {
   dbPath?: string; // ":memory:" for tests
   publicDir?: string;
   daemonUrl?: string; // self URL injected into spawned sessions' hooks
+  vaultDir?: string; // markdown vault root; defaults under cwd
 }
 
 export interface Daemon {
@@ -27,6 +30,7 @@ export interface Daemon {
   store: AgentStateStore;
   log: EventLog;
   guardrails: GuardrailEngine;
+  vault: Vault;
   /** Sessions currently streaming via hooks; transcript watcher defers to these. */
   hookSessions: Set<string>;
 }
@@ -37,6 +41,14 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
   const store = new AgentStateStore();
   const log = new EventLog(options.dbPath ?? "aura.db");
   const guardrails = new GuardrailEngine();
+  const vaultDbPath = options.dbPath && options.dbPath !== ":memory:"
+    ? options.dbPath.replace(/\.db$/, "") + ".vault.db"
+    : ":memory:";
+  const vault = new Vault(
+    options.vaultDir ?? path.join(process.cwd(), "vault"),
+    vaultDbPath,
+  );
+  vault.reindex();
   const sockets = new Set<WebSocket>();
   const hookSessions = new Set<string>();
 
@@ -177,6 +189,32 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
   });
   app.get("/api/health", async () => ({ ok: true, version: SERVER_VERSION }));
 
+  // Vault (Obsidian-compatible markdown memory).
+  app.get("/api/vault/notes", async () => ({ notes: vault.list() }));
+  app.get("/api/vault/search", async (req) => {
+    const { q } = req.query as { q?: string };
+    return { hits: vault.search(q ?? "") };
+  });
+  app.get("/api/vault/graph", async () => vault.graph());
+  app.get("/api/vault/note", async (req, reply) => {
+    const { slug } = req.query as { slug?: string };
+    if (!slug) return reply.code(400).send({ error: "slug required" });
+    const body = vault.read(slug);
+    if (body === null) return reply.code(404).send({ error: "not found" });
+    return { slug, body };
+  });
+  app.post("/api/vault/note", async (req, reply) => {
+    const { slug, body } = (req.body ?? {}) as { slug?: string; body?: string };
+    if (!slug || typeof body !== "string") return reply.code(400).send({ error: "slug and body required" });
+    vault.write(slug, body);
+    return reply.send({ ok: true, slug });
+  });
+  app.post("/api/vault/brief", async (req) => {
+    const { sinceHours } = (req.body ?? {}) as { sinceHours?: number };
+    const slug = writeBrief(vault, log, (sinceHours ?? 24) * 3_600_000);
+    return { ok: true, slug, body: vault.read(slug) };
+  });
+
   // Managed sessions (assign-card → spawn flow lands on this).
   const sessions = new SessionManager(
     options.daemonUrl ?? `http://127.0.0.1:${process.env["AURA_PORT"] ?? 8311}`,
@@ -200,7 +238,9 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     return reply.send({ ok: true });
   });
 
-  return { app, bus, store, log, guardrails, hookSessions };
+  app.addHook("onClose", async () => vault.close());
+
+  return { app, bus, store, log, guardrails, vault, hookSessions };
 }
 
 export function defaultPublicDir(): string {
