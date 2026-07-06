@@ -291,14 +291,11 @@ function slotFor(a, entry) {
 function ensureAgent(a) {
   let entry = agents.get(a.agentId);
   if (!entry) {
+    const TARGET_H = 1.6; // meters — reads clearly against 0.74m desks
     let group, mixer = null, actions = {};
     if (robotTemplate) {
       group = SkeletonUtils.clone(robotTemplate.scene);
-      // normalize height ~1.15m
-      const bb = new THREE.Box3().setFromObject(group);
-      const s = 1.15 / bb.getSize(new THREE.Vector3()).y;
-      group.scale.setScalar(s);
-      // tint: clone materials, color the primary (largest) surfaces
+      // tint: clone materials, blend toward the agent color
       const color = new THREE.Color(agentColor(a.agentId));
       group.traverse((o) => {
         if (o.isMesh || o.isSkinnedMesh) {
@@ -315,11 +312,22 @@ function ensureAgent(a) {
       if (walk) { actions.walk = mixer.clipAction(walk); }
       if (wave) { actions.wave = mixer.clipAction(wave); actions.wave.loop = THREE.LoopOnce; }
       actions.idle?.play();
+      // Normalize height AFTER the pose settles: bind the skeleton, sample one
+      // frame of idle, and update world matrices so the bbox reflects the
+      // actual on-screen mesh (setFromObject on an unposed skinned clone lies).
+      mixer.update(0);
+      group.updateWorldMatrix(true, true);
+      const measured = new THREE.Box3().setFromObject(group).getSize(new THREE.Vector3()).y;
+      const s = measured > 1e-4 ? TARGET_H / measured : 1;
+      group.scale.setScalar(s);
     } else {
       group = buildRobotFallback(agentColor(a.agentId));
+      group.scale.setScalar(TARGET_H / 1.15);
     }
     const tag = makeLabel(a.agentId, 1.5);
-    tag.position.y = 1.55;
+    // tag sits above the head in the group's LOCAL space (pre-scale units).
+    const preScaleH = robotTemplate ? new THREE.Box3().setFromObject(group).getSize(new THREE.Vector3()).y / group.scale.y : 1.6;
+    tag.position.y = preScaleH + 0.25;
     group.add(tag);
     group.userData.agentId = a.agentId;
     scene.add(group);
@@ -408,7 +416,14 @@ function connect() {
   };
 }
 
-window.__aura = { agents, scene };
+window.__aura = {
+  agents, scene,
+  worldHeight(id) {
+    const e = agents.get(id); if (!e) return null;
+    e.group.updateWorldMatrix(true, true);
+    return +new THREE.Box3().setFromObject(e.group).getSize(new THREE.Vector3()).y.toFixed(3);
+  },
+};
 
 // ---------- boot ----------
 await Promise.all([buildOffice(), loadRobot()]);
