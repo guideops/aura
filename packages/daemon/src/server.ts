@@ -15,6 +15,7 @@ import { SessionManager } from "./session-manager.js";
 import { Vault } from "./vault.js";
 import { writeBrief } from "./brief.js";
 import { Board } from "./board.js";
+import { SkillRegistry, SkillValidationError } from "./skills.js";
 import { SyncEngine, type ConflictReport } from "./github-sync.js";
 import { OctokitProjectClient } from "./github-client.js";
 import type { BoardMessage } from "@aura/core";
@@ -26,6 +27,7 @@ export interface DaemonOptions {
   publicDir?: string;
   daemonUrl?: string; // self URL injected into spawned sessions' hooks
   vaultDir?: string; // markdown vault root; defaults under cwd
+  skillsDir?: string; // skills root (<dir>/<name>/SKILL.md); defaults under cwd
 }
 
 export interface Daemon {
@@ -36,6 +38,7 @@ export interface Daemon {
   guardrails: GuardrailEngine;
   vault: Vault;
   board: Board;
+  skills: SkillRegistry;
   /** Sessions currently streaming via hooks; transcript watcher defers to these. */
   hookSessions: Set<string>;
 }
@@ -58,6 +61,7 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     ? options.dbPath.replace(/\.db$/, "") + ".board.db"
     : ":memory:";
   const board = new Board(boardDbPath);
+  const skills = new SkillRegistry(options.skillsDir ?? path.join(process.cwd(), "skills"));
   const sockets = new Set<WebSocket>();
   const hookSessions = new Set<string>();
 
@@ -240,6 +244,32 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     return { ok: true, slug, body: vault.read(slug) };
   });
 
+  // Skills registry (agentskills.io-compatible SKILL.md files are the truth).
+  app.get("/api/skills", async () => ({ skills: skills.list() }));
+  app.post("/api/skills/reindex", async () => ({ ok: true, count: skills.reindex() }));
+  app.get("/api/skills/:name", async (req, reply) => {
+    const { name } = req.params as { name: string };
+    const entry = skills.get(name);
+    if (!entry) return reply.code(404).send({ error: "not found" });
+    return { skill: entry, body: skills.read(name) };
+  });
+  app.put("/api/skills/:name", async (req, reply) => {
+    const { name } = req.params as { name: string };
+    const { body } = (req.body ?? {}) as { body?: string };
+    if (typeof body !== "string") return reply.code(400).send({ error: "body required" });
+    try {
+      return reply.send({ skill: skills.write(name, body) });
+    } catch (err) {
+      if (err instanceof SkillValidationError) return reply.code(400).send({ error: err.message });
+      throw err;
+    }
+  });
+  app.delete("/api/skills/:name", async (req, reply) => {
+    const { name } = req.params as { name: string };
+    if (!skills.remove(name)) return reply.code(404).send({ error: "not found" });
+    return reply.send({ ok: true });
+  });
+
   // Managed sessions (assign-card → spawn flow lands on this).
   const sessions = new SessionManager(
     options.daemonUrl ?? `http://127.0.0.1:${process.env["AURA_PORT"] ?? 8311}`,
@@ -354,7 +384,7 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
 
   app.addHook("onClose", async () => { vault.close(); board.close(); syncEngine?.close(); });
 
-  return { app, bus, store, log, guardrails, vault, board, hookSessions };
+  return { app, bus, store, log, guardrails, vault, board, skills, hookSessions };
 }
 
 export function defaultPublicDir(): string {
