@@ -10,9 +10,35 @@ export interface ManagedSession {
   pid: number | null;
   cwd: string;
   prompt: string;
+  skills: string[];
   status: "running" | "exited" | "failed";
   exitCode: number | null;
   startedAt: number;
+}
+
+export interface EquippedSkill {
+  name: string;
+  body: string; // full SKILL.md content, frontmatter included
+}
+
+const FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
+
+/**
+ * Prompt preamble for equipped skills. Skills travel inside the prompt (not
+ * the target project's .claude/skills) so spawning never mutates the repo.
+ */
+export function buildPrompt(prompt: string, skills: EquippedSkill[]): string {
+  if (!skills.length) return prompt;
+  const sections = skills.map((s) => {
+    const body = s.body.replace(FRONTMATTER, "").trim();
+    return `### Skill: ${s.name}\n\n${body}`;
+  });
+  return [
+    "You have the following skills equipped. Follow them when relevant to the task.",
+    ...sections,
+    "---",
+    `Task:\n${prompt}`,
+  ].join("\n\n");
 }
 
 /**
@@ -31,19 +57,22 @@ export class SessionManager {
     return [...this.sessions.values()];
   }
 
-  spawn(input: { cwd: string; prompt: string; model?: string }): ManagedSession {
+  spawn(input: { cwd: string; prompt: string; model?: string; skills?: EquippedSkill[] }): ManagedSession {
     const id = ulid();
+    const equipped = input.skills ?? [];
+    const fullPrompt = buildPrompt(input.prompt, equipped);
     const session: ManagedSession = {
       id,
       pid: null,
       cwd: input.cwd,
       prompt: input.prompt,
+      skills: equipped.map((s) => s.name),
       status: "running",
       exitCode: null,
       startedAt: Date.now(),
     };
 
-    const args = ["-p", input.prompt, "--settings", this.ensureSettingsFile()];
+    const args = ["-p", fullPrompt, "--settings", this.ensureSettingsFile()];
     if (input.model) args.push("--model", input.model);
 
     // shell:true so Windows resolves claude.cmd from PATH.

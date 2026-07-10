@@ -11,7 +11,7 @@ import { EventBus } from "./event-bus.js";
 import { AgentStateStore } from "./state-store.js";
 import { EventLog } from "./persistence.js";
 import { GuardrailEngine } from "./guardrails.js";
-import { SessionManager } from "./session-manager.js";
+import { SessionManager, type EquippedSkill } from "./session-manager.js";
 import { Vault } from "./vault.js";
 import { writeBrief } from "./brief.js";
 import { Board } from "./board.js";
@@ -275,16 +275,30 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     options.daemonUrl ?? `http://127.0.0.1:${process.env["AURA_PORT"] ?? 8311}`,
   );
   app.get("/api/sessions", async () => ({ sessions: sessions.list() }));
+  // Resolves skill names → {name, body} for equipping; throws on unknown names.
+  const resolveSkills = (names: string[]) =>
+    names.map((name) => {
+      const body = skills.read(name);
+      if (body === null) throw new SkillValidationError(`unknown skill "${name}"`);
+      return { name, body };
+    });
+
   app.post("/api/sessions", async (req, reply) => {
-    const body = (req.body ?? {}) as { cwd?: string; prompt?: string; model?: string };
+    const body = (req.body ?? {}) as { cwd?: string; prompt?: string; model?: string; skills?: string[] };
     if (!body.cwd || !body.prompt) {
       return reply.code(400).send({ error: "cwd and prompt required" });
     }
-    const spawnInput: { cwd: string; prompt: string; model?: string } = {
+    const spawnInput: { cwd: string; prompt: string; model?: string; skills?: EquippedSkill[] } = {
       cwd: body.cwd,
       prompt: body.prompt,
     };
     if (body.model) spawnInput.model = body.model;
+    try {
+      if (body.skills?.length) spawnInput.skills = resolveSkills(body.skills);
+    } catch (err) {
+      if (err instanceof SkillValidationError) return reply.code(400).send({ error: err.message });
+      throw err;
+    }
     return reply.send({ session: sessions.spawn(spawnInput) });
   });
   app.delete("/api/sessions/:id", async (req, reply) => {
@@ -335,8 +349,11 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     let session = null;
     if (b.cwd) {
       const prompt = `Work on ${card.key}: ${card.title}\n\n${card.body}`.trim();
-      const spawnInput: { cwd: string; prompt: string; model?: string } = { cwd: b.cwd, prompt };
+      const spawnInput: { cwd: string; prompt: string; model?: string; skills?: EquippedSkill[] } = { cwd: b.cwd, prompt };
       if (b.model) spawnInput.model = b.model;
+      // Card tags that name a registered skill auto-equip it.
+      const matched = card.tags.filter((t) => skills.get(t));
+      if (matched.length) spawnInput.skills = resolveSkills(matched);
       session = sessions.spawn(spawnInput);
     }
     return reply.send({ card: updated, session });
