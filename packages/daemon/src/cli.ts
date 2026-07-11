@@ -9,10 +9,13 @@ import { writeBrief } from "./brief.js";
 const PORT = Number(process.env["AURA_PORT"] ?? 8311);
 const HOST = "127.0.0.1"; // local-only by design; never bind 0.0.0.0
 
-const daemon = createDaemon({
+const daemonOptions: Parameters<typeof createDaemon>[0] = {
   dbPath: process.env["AURA_DB"] ?? path.join(process.cwd(), "aura.db"),
   publicDir: defaultPublicDir(),
-});
+};
+if (process.env["AURA_VAULT"]) daemonOptions.vaultDir = process.env["AURA_VAULT"];
+if (process.env["AURA_SKILLS"]) daemonOptions.skillsDir = process.env["AURA_SKILLS"];
+const daemon = createDaemon(daemonOptions);
 
 const permissionsPath = process.env["AURA_PERMISSIONS"] ?? path.join(process.cwd(), "permissions.yaml");
 if (fs.existsSync(permissionsPath)) {

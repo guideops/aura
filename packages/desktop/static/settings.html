@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>AURA — GitHub Sync</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; padding:20px; font:13px/1.5 ui-monospace, Consolas, monospace; background:#0e1116; color:#dbe2ea; }
+  h1 { font-size:14px; letter-spacing:.1em; margin:0 0 14px; }
+  label { display:block; font-size:11px; color:#8b98a9; text-transform:uppercase; letter-spacing:.06em; margin:12px 0 4px; }
+  input { width:100%; box-sizing:border-box; background:#161b22; border:1px solid #242c37; border-radius:8px; color:#dbe2ea; padding:8px 10px; font:inherit; }
+  button { margin-top:16px; border:0; border-radius:8px; padding:8px 16px; font-weight:600; cursor:pointer; background:#2563eb; color:#fff; }
+  button.ghost { background:#242c37; color:#dbe2ea; margin-left:8px; }
+  #status { margin-top:14px; color:#8b98a9; min-height:1.5em; }
+  #status.ok { color:#5ee0a0; }
+  #status.err { color:#ff7b8a; }
+</style>
+</head>
+<body>
+<h1>GITHUB SYNC</h1>
+<label for="token">Personal access token (project scope)</label>
+<input id="token" type="password" placeholder="github_pat_…" autocomplete="off" />
+<label for="project">Project ID (PVT_…)</label>
+<input id="project" type="text" placeholder="PVT_kwDO…" />
+<div>
+  <button id="save">Link</button>
+  <button id="clear" class="ghost">Unlink</button>
+</div>
+<div id="status"></div>
+<script>
+  const statusEl = document.getElementById("status");
+  const show = (msg, cls) => { statusEl.textContent = msg; statusEl.className = cls || ""; };
+
+  async function refresh() {
+    const s = await window.aura.github.status();
+    show(s.linked ? "linked — sync active" : s.stored ? "stored, not linked" : "not linked");
+    if (s.linked) statusEl.className = "ok";
+  }
+  document.getElementById("save").addEventListener("click", async () => {
+    const token = document.getElementById("token").value.trim();
+    const projectId = document.getElementById("project").value.trim();
+    if (!token || !projectId) return show("token and project id required", "err");
+    show("linking…");
+    const r = await window.aura.github.save(token, projectId);
+    if (r.ok) { document.getElementById("token").value = ""; refresh(); }
+    else show(r.error || "failed", "err");
+  });
+  document.getElementById("clear").addEventListener("click", async () => {
+    await window.aura.github.clear();
+    show("cleared stored credentials");
+  });
+  refresh();
+</script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+{
+  "name": "@aura/desktop",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "main": "./dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "electron .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aura/daemon": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "electron": "^33.2.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}
