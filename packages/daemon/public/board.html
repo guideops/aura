@@ -28,6 +28,18 @@
   .dot { width:9px; height:9px; border-radius:50%; display:inline-block; }
   .bar { height:5px; background:#eef1f5; border-radius:4px; margin-top:8px; overflow:hidden; }
   .bar > i { display:block; height:100%; background:#2563eb; }
+  .tag.skill { background:#ecfdf5; color:#059669; }
+  dialog { border:1px solid var(--line); border-radius:12px; padding:18px; width:360px; box-shadow:0 12px 40px rgba(20,30,50,.18); }
+  dialog::backdrop { background:rgba(20,30,50,.35); }
+  dialog h3 { margin:0 0 12px; font-size:14px; }
+  dialog label { display:block; font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.06em; margin:10px 0 4px; }
+  dialog input[type=text] { width:100%; border:1px solid var(--line); border-radius:8px; padding:6px 10px; font:inherit; }
+  .skill-row { display:flex; align-items:center; gap:8px; padding:4px 0; font-size:13px; }
+  .skill-row .desc { color:var(--dim); font-size:11px; }
+  dialog menu { display:flex; justify-content:flex-end; gap:8px; margin:16px 0 0; padding:0; }
+  dialog button { border:0; border-radius:8px; padding:7px 14px; font-weight:600; cursor:pointer; }
+  dialog .primary { background:#2563eb; color:#fff; }
+  dialog .ghost { background:#eef1f5; color:var(--tx); }
 </style>
 </head>
 <body>
@@ -37,6 +49,19 @@
   <input id="new" placeholder="New card title… (Enter)" />
 </header>
 <main id="board"></main>
+<dialog id="assign">
+  <h3 id="assign-title">Assign card</h3>
+  <label for="assign-agent">Agent id</label>
+  <input type="text" id="assign-agent" placeholder="blue-1 (optional)" />
+  <label for="assign-cwd">Working directory (spawns session)</label>
+  <input type="text" id="assign-cwd" placeholder="C:\path\to\repo (optional)" />
+  <label>Skills</label>
+  <div id="assign-skills"><span class="desc">none registered</span></div>
+  <menu>
+    <button class="ghost" id="assign-cancel">Cancel</button>
+    <button class="primary" id="assign-go">Assign</button>
+  </menu>
+</dialog>
 <script type="module">
 const COLS = [
   { status: "backlog", title: "Backlog" },
@@ -54,8 +79,12 @@ function agentDot(assignee) {
   const c = AGENT_COLORS[assignee.split("-")[0]] ?? "#64748b";
   return `<span class="assignee"><span class="dot" style="background:${c}"></span>${assignee}</span>`;
 }
+let skillNames = new Set();
+let skillList = [];
 function cardHTML(c) {
-  const tags = c.tags.map((t) => `<span class="tag">${t}</span>`).join("");
+  const tags = c.tags.map((t) =>
+    `<span class="tag${skillNames.has(t) ? " skill" : ""}">${skillNames.has(t) ? "⚡" : ""}${escapeHtml(t)}</span>`,
+  ).join("");
   const bar = c.progress > 0 ? `<div class="bar"><i style="width:${c.progress}%"></i></div>` : "";
   return `<div class="card" draggable="true" data-id="${c.id}">
     <div class="key">${c.key}</div>
@@ -81,6 +110,7 @@ function wireDnD() {
   let dragId = null;
   for (const card of boardEl.querySelectorAll(".card")) {
     card.addEventListener("dragstart", (e) => { dragId = card.dataset.id; e.dataTransfer.effectAllowed = "move"; });
+    card.addEventListener("dblclick", () => openAssign(card.dataset.id));
   }
   for (const col of boardEl.querySelectorAll(".col")) {
     col.addEventListener("dragover", (e) => { e.preventDefault(); col.classList.add("drop"); });
@@ -111,8 +141,49 @@ document.getElementById("new").addEventListener("keydown", async (e) => {
   }).catch(() => {});
 });
 
+const assignDlg = document.getElementById("assign");
+let assignCardId = null;
+function openAssign(id) {
+  const c = cards.get(id);
+  if (!c) return;
+  assignCardId = id;
+  document.getElementById("assign-title").textContent = `Assign ${c.key} — ${c.title}`;
+  document.getElementById("assign-agent").value = c.assignee ?? "";
+  const skillsEl = document.getElementById("assign-skills");
+  if (skillList.length) {
+    skillsEl.innerHTML = skillList.map((s) => `
+      <label class="skill-row"><input type="checkbox" value="${escapeHtml(s.meta.name)}"
+        ${c.tags.includes(s.meta.name) ? "checked" : ""}/>
+        ⚡${escapeHtml(s.meta.name)} <span class="desc">${escapeHtml(s.meta.description)}</span></label>`).join("");
+  } else {
+    skillsEl.innerHTML = '<span class="desc">none registered</span>';
+  }
+  assignDlg.showModal();
+}
+document.getElementById("assign-cancel").addEventListener("click", () => assignDlg.close());
+document.getElementById("assign-go").addEventListener("click", async () => {
+  const body = {};
+  const agentId = document.getElementById("assign-agent").value.trim();
+  const cwd = document.getElementById("assign-cwd").value.trim();
+  if (agentId) body.agentId = agentId;
+  if (cwd) body.cwd = cwd;
+  const picked = [...document.querySelectorAll("#assign-skills input:checked")].map((i) => i.value);
+  if (picked.length) body.skills = picked;
+  const res = await fetch(`/api/board/cards/${assignCardId}/assign`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) { alert((await res.json()).error ?? res.status); return; }
+  assignDlg.close();
+});
+
 async function boot() {
-  const res = await fetch("/api/board/cards").then((r) => r.json());
+  const [res, sk] = await Promise.all([
+    fetch("/api/board/cards").then((r) => r.json()),
+    fetch("/api/skills").then((r) => r.json()).catch(() => ({ skills: [] })),
+  ]);
+  skillList = sk.skills;
+  skillNames = new Set(skillList.map((s) => s.meta.name));
   for (const c of res.cards) cards.set(c.id, c);
   render();
   connect();

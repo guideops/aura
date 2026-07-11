@@ -338,7 +338,7 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
   // Assign a card to an agent and spawn a session bound to it.
   app.post("/api/board/cards/:id/assign", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const b = (req.body ?? {}) as { agentId?: string; cwd?: string; model?: string };
+    const b = (req.body ?? {}) as { agentId?: string; cwd?: string; model?: string; skills?: string[] };
     const card = board.get(id);
     if (!card) return reply.code(404).send({ error: "not found" });
     const updated = board.update(id, {
@@ -351,9 +351,14 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
       const prompt = `Work on ${card.key}: ${card.title}\n\n${card.body}`.trim();
       const spawnInput: { cwd: string; prompt: string; model?: string; skills?: EquippedSkill[] } = { cwd: b.cwd, prompt };
       if (b.model) spawnInput.model = b.model;
-      // Card tags that name a registered skill auto-equip it.
-      const matched = card.tags.filter((t) => skills.get(t));
-      if (matched.length) spawnInput.skills = resolveSkills(matched);
+      // Explicit skills win; otherwise card tags naming a registered skill auto-equip.
+      const names = b.skills ?? card.tags.filter((t) => skills.get(t));
+      try {
+        if (names.length) spawnInput.skills = resolveSkills(names);
+      } catch (err) {
+        if (err instanceof SkillValidationError) return reply.code(400).send({ error: err.message });
+        throw err;
+      }
       session = sessions.spawn(spawnInput);
     }
     return reply.send({ card: updated, session });
