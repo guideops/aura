@@ -16,6 +16,7 @@ import { Vault } from "./vault.js";
 import { writeBrief } from "./brief.js";
 import { Board } from "./board.js";
 import { SkillRegistry, SkillValidationError } from "./skills.js";
+import { BoardProgress } from "./board-progress.js";
 import { SyncEngine, type ConflictReport } from "./github-sync.js";
 import { OctokitProjectClient } from "./github-client.js";
 import type { BoardMessage } from "@aura/core";
@@ -75,9 +76,15 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
   // External vault edits (Obsidian, editors) → reindex → live UI refresh.
   vault.watch((noteCount) => broadcast({ kind: "vault.updated", noteCount }));
 
+  // Agent activity animates assigned cards (progress bar, session.end → review).
+  const boardProgress = new BoardProgress(board, (card) =>
+    broadcast({ kind: "card.upsert", card }),
+  );
+
   bus.subscribe((event) => {
     log.append(event);
     const snapshot = store.apply(event);
+    boardProgress.apply(event);
     broadcast({ kind: "event", event });
     if (snapshot) broadcast({ kind: "snapshot", agent: snapshot });
   });
