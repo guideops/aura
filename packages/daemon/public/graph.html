@@ -60,18 +60,22 @@
   async function load() {
     const g = await fetch("/api/vault/graph").then((r) => r.json());
     const w = canvas.clientWidth, h = canvas.clientHeight;
+    // Keep positions of surviving nodes so live refreshes don't scramble the layout.
+    const prev = new Map(nodes.map((n) => [n.id, n]));
     const byId = new Map();
     nodes = g.nodes.map((n, i) => {
+      const old = prev.get(n.id);
       const angle = (i / Math.max(g.nodes.length, 1)) * Math.PI * 2;
       const node = {
         ...n,
-        x: w / 2 + Math.cos(angle) * Math.min(w, h) / 3,
-        y: h / 2 + Math.sin(angle) * Math.min(w, h) / 3,
+        x: old ? old.x : w / 2 + Math.cos(angle) * Math.min(w, h) / 3,
+        y: old ? old.y : h / 2 + Math.sin(angle) * Math.min(w, h) / 3,
         vx: 0, vy: 0, degree: 0,
       };
       byId.set(n.id, node);
       return node;
     });
+    if (selected) selected = byId.get(selected.id) ?? null;
     edges = g.edges
       .map((e) => ({ from: byId.get(e.from), to: byId.get(e.to) }))
       .filter((e) => e.from && e.to);
@@ -205,9 +209,19 @@
     }
   }
 
+  function connect() {
+    const ws = new WebSocket(`ws://${location.host}/ws`);
+    ws.onclose = () => setTimeout(connect, 1500);
+    ws.onmessage = (m) => {
+      const msg = JSON.parse(m.data);
+      if (msg.kind === "vault.updated") load();
+    };
+  }
+
   resize();
   load().then(loop);
   loadSkills();
+  connect();
 </script>
 </body>
 </html>

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Vault } from "./vault.js";
 import { EventLog } from "./persistence.js";
 import { generateBrief } from "./brief.js";
@@ -62,6 +62,25 @@ describe("Vault", () => {
     vault.write("x", "# X\nhello");
     expect(vault.search('"')).toEqual([]);
     expect(vault.search("hel")).toHaveLength(1); // prefix match
+  });
+
+  it("watch reindexes on external edits, debounced", async () => {
+    const seen: number[] = [];
+    vault.watch((n) => seen.push(n), 50);
+    fs.writeFileSync(path.join(dir, "One.md"), "# One");
+    fs.writeFileSync(path.join(dir, "Two.md"), "# Two");
+    await vi.waitFor(() => expect(seen.length).toBeGreaterThan(0), { timeout: 3000 });
+    expect(seen.at(-1)).toBe(2); // both files in one debounced reindex
+    expect(vault.list().map((n) => n.slug).sort()).toEqual(["One", "Two"]);
+  });
+
+  it("watch ignores the vault's own write()s", async () => {
+    const seen: number[] = [];
+    vault.watch((n) => seen.push(n), 50);
+    vault.write("Self", "# Self\nwritten via API");
+    await new Promise((r) => setTimeout(r, 400));
+    expect(seen).toEqual([]);
+    expect(vault.read("Self")).toContain("via API"); // still indexed incrementally
   });
 });
 

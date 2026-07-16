@@ -72,6 +72,9 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     }
   };
 
+  // External vault edits (Obsidian, editors) → reindex → live UI refresh.
+  vault.watch((noteCount) => broadcast({ kind: "vault.updated", noteCount }));
+
   bus.subscribe((event) => {
     log.append(event);
     const snapshot = store.apply(event);

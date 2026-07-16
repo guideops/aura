@@ -98,5 +98,7 @@ export const ServerMessage = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("agent.removed"), agentId: z.string() }),
   z.object({ kind: z.literal("approval.pending"), request: ActionRequest }),
   z.object({ kind: z.literal("approval.resolved"), id: z.string(), status: z.string() }),
+  /** Vault markdown changed on disk (external edit); index already rebuilt. */
+  z.object({ kind: z.literal("vault.updated"), noteCount: z.number().int().nonnegative() }),
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;

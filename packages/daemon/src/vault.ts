@@ -28,6 +28,9 @@ const WIKILINK = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
  */
 export class Vault {
   private db: Database.Database;
+  private watcher: fs.FSWatcher | null = null;
+  private debounce: NodeJS.Timeout | null = null;
+  private suppressWatch = 0;
 
   constructor(private root: string, dbPath = ":memory:") {
     fs.mkdirSync(this.root, { recursive: true });
@@ -99,6 +102,11 @@ export class Vault {
   write(slug: string, body: string): void {
     const p = this.pathFor(slug);
     fs.mkdirSync(path.dirname(p), { recursive: true });
+    // Own writes must not trigger the external-edit watcher: hold suppression
+    // past the debounce window so the queued fs events drain unheard.
+    this.suppressWatch++;
+    const release = setTimeout(() => { this.suppressWatch--; }, 500);
+    release.unref?.();
     fs.writeFileSync(p, body, "utf8");
     const title = titleOf(body, slug);
     const now = Date.now();
@@ -134,9 +142,32 @@ export class Vault {
     return { nodes, edges };
   }
 
+  /**
+   * Watches the folder for external edits (Obsidian, git pull, editors) and
+   * reindexes after a quiet period. Own writes via write() are suppressed —
+   * they already update the index incrementally. Callback fires post-reindex.
+   */
+  watch(onChange: (noteCount: number) => void, debounceMs = 300): void {
+    if (this.watcher) return;
+    this.watcher = fs.watch(this.root, { recursive: true }, (_ev, file) => {
+      if (this.suppressWatch > 0) return;
+      if (file && !String(file).toLowerCase().endsWith(".md")) return;
+      if (this.debounce) clearTimeout(this.debounce);
+      this.debounce = setTimeout(() => {
+        this.debounce = null;
+        onChange(this.reindex());
+      }, debounceMs);
+      this.debounce.unref?.();
+    });
+  }
+
   get rootDir(): string { return this.root; }
 
-  close(): void { this.db.close(); }
+  close(): void {
+    if (this.debounce) clearTimeout(this.debounce);
+    this.watcher?.close();
+    this.db.close();
+  }
 
   private toSlug(absFile: string): string {
     return path.relative(this.root, absFile).replace(/\\/g, "/").replace(/\.md$/i, "");
