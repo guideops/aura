@@ -45,7 +45,10 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 
-const EMBED = new URLSearchParams(location.search).has("embed");
+const PARAMS = new URLSearchParams(location.search);
+// "mini" = System Overview widget in the shell: embed chrome-hidden + implies embed.
+const MINI = PARAMS.has("mini");
+const EMBED = PARAMS.has("embed") || MINI;
 if (EMBED) {
   document.getElementById("hud").style.display = "none";
   document.getElementById("approvals").style.display = "none";

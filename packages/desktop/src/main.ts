@@ -101,7 +101,7 @@ function createWindow(): BrowserWindow {
       nodeIntegration: false,
     },
   });
-  void win.loadURL(`${BASE}/app/index.html`);
+  void win.loadURL(`${BASE}/shell/`);
   // Close = hide to tray; the daemon (and office) keep running. Quit via tray.
   win.on("close", (e) => {
     if (!quitting) {
@@ -123,10 +123,11 @@ function createTray(win: BrowserWindow): void {
   tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image);
   tray.setToolTip("AURA — agent command center");
   const menu = Menu.buildFromTemplate([
-    { label: "Open Command Center", click: () => showMain(win, "app/index.html") },
-    { label: "Office", click: () => showMain(win, "app/index.html?view=office") },
-    { label: "Board", click: () => showMain(win, "app/index.html?view=board") },
+    { label: "Open Command Center", click: () => showMain(win, "shell/") },
+    { label: "Office", click: () => showMain(win, "office.html") },
+    { label: "Board", click: () => showMain(win, "shell/") },
     { label: "Connections", click: () => showMain(win, "app/index.html?view=connections") },
+    { label: "Legacy Console", click: () => showMain(win, "app/index.html") },
     { type: "separator" },
     {
       label: "Sync GitHub now",
@@ -197,10 +198,11 @@ app.whenReady().then(async () => {
 
   const main = createWindow();
   const pages = [
-    { label: "Command Center", page: "app/index.html" },
+    { label: "Command Center", page: "shell/" },
     { label: "Office", page: "office.html" },
     { label: "Board", page: "board.html" },
-    { label: "Console", page: "index.html" },
+    { label: "Legacy Console", page: "app/index.html" },
+    { label: "Debug Console", page: "index.html" },
   ];
   const menu = Menu.buildFromTemplate([
     {

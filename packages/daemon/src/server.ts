@@ -22,6 +22,7 @@ import { Vault } from "./vault.js";
 import { writeBrief } from "./brief.js";
 import { Board } from "./board.js";
 import { SkillRegistry, SkillValidationError } from "./skills.js";
+import { gitBranch as workspaceGitBranch, workspaceTree } from "./workspace.js";
 import { BoardProgress } from "./board-progress.js";
 import { SyncEngine, type ConflictReport, type GitHubProjectClient } from "./github-sync.js";
 import { OctokitProjectClient } from "./github-client.js";
@@ -266,6 +267,10 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
   });
   app.get("/api/health", async () => ({ ok: true, version: SERVER_VERSION }));
 
+  // ---- Workspace explorer (shell UI): file tree + git badges ----
+  app.get("/api/workspace/tree", async () => ({ tree: await workspaceTree(process.cwd()) }));
+  app.get("/api/workspace/git", async () => (await workspaceGitBranch(process.cwd())) ?? { branch: null, dirty: false });
+
   // Vault (Obsidian-compatible markdown memory).
   app.get("/api/vault/notes", async () => ({ notes: vault.list() }));
   app.get("/api/vault/search", async (req) => {
@@ -404,12 +409,34 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
   const emitCard = (card: Card) => broadcast({ kind: "card.upsert", card });
   app.get("/api/board/cards", async () => ({ cards: board.list() }));
   app.post("/api/board/cards", async (req, reply) => {
-    const b = (req.body ?? {}) as { title?: string; body?: string; status?: CardStatus; tags?: string[] };
+    const b = (req.body ?? {}) as {
+      title?: string; body?: string; status?: CardStatus; tags?: string[];
+      externalRef?: string; priority?: "low" | "medium" | "high" | "urgent"; milestone?: string;
+    };
     if (!b.title) return reply.code(400).send({ error: "title required" });
-    const created: { title: string; body?: string; status?: CardStatus; tags?: string[] } = { title: b.title };
+    // Idempotent peer ingestion: same externalRef updates rather than duplicates.
+    if (b.externalRef) {
+      const existing = board.getByRef(b.externalRef);
+      if (existing) {
+        const patch: Record<string, unknown> = { title: b.title };
+        if (b.body !== undefined) patch.body = b.body;
+        if (b.status !== undefined) patch.status = b.status;
+        if (b.tags !== undefined) patch.tags = b.tags;
+        const updated = board.update(existing.id, patch);
+        if (updated) emitCard(updated);
+        return reply.send({ card: updated });
+      }
+    }
+    const created: {
+      title: string; body?: string; status?: CardStatus; tags?: string[];
+      externalRef?: string; priority?: "low" | "medium" | "high" | "urgent"; milestone?: string;
+    } = { title: b.title };
     if (b.body !== undefined) created.body = b.body;
     if (b.status !== undefined) created.status = b.status;
     if (b.tags !== undefined) created.tags = b.tags;
+    if (b.externalRef !== undefined) created.externalRef = b.externalRef;
+    if (b.priority !== undefined) created.priority = b.priority;
+    if (b.milestone !== undefined) created.milestone = b.milestone;
     const card = board.create(created);
     emitCard(card);
     return reply.send({ card });

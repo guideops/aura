@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { ulid } from "ulid";
-import { Card, type CardStatus } from "@aura/core";
+import { Card, type CardPriority, type CardStatus } from "@aura/core";
 
 export interface CreateCardInput {
   title: string;
@@ -8,6 +8,9 @@ export interface CreateCardInput {
   status?: CardStatus;
   tags?: string[];
   key?: string;
+  externalRef?: string;
+  priority?: CardPriority;
+  milestone?: string;
 }
 
 /**
@@ -42,6 +45,11 @@ export class Board {
     `);
     // Migration for boards created before session binding existed.
     try { this.db.exec("ALTER TABLE cards ADD COLUMN session_id TEXT"); } catch { /* exists */ }
+    // Migrations for the shell UI card metadata (priority/milestone/checklist/peer ref).
+    try { this.db.exec("ALTER TABLE cards ADD COLUMN external_ref TEXT"); } catch { /* exists */ }
+    try { this.db.exec("ALTER TABLE cards ADD COLUMN priority TEXT NOT NULL DEFAULT 'medium'"); } catch { /* exists */ }
+    try { this.db.exec("ALTER TABLE cards ADD COLUMN milestone TEXT"); } catch { /* exists */ }
+    try { this.db.exec("ALTER TABLE cards ADD COLUMN checklist TEXT NOT NULL DEFAULT '[]'"); } catch { /* exists */ }
     const maxKey = this.db
       .prepare("SELECT key FROM cards WHERE key LIKE 'AURA-%' ORDER BY CAST(SUBSTR(key,6) AS INTEGER) DESC LIMIT 1")
       .get() as { key: string } | undefined;
@@ -53,6 +61,11 @@ export class Board {
   }
   get(id: string): Card | undefined {
     const row = this.db.prepare("SELECT * FROM cards WHERE id = ?").get(id) as RawCard | undefined;
+    return row ? hydrate(row) : undefined;
+  }
+  /** Find a card by its peer (AW/Hermes) task id for idempotent ingestion. */
+  getByRef(externalRef: string): Card | undefined {
+    const row = this.db.prepare("SELECT * FROM cards WHERE external_ref = ?").get(externalRef) as RawCard | undefined;
     return row ? hydrate(row) : undefined;
   }
   getByExternal(externalId: string): Card | undefined {
@@ -71,6 +84,10 @@ export class Board {
       assignee: null,
       progress: 0,
       externalId: null,
+      externalRef: input.externalRef ?? null,
+      priority: input.priority ?? "medium",
+      milestone: input.milestone ?? null,
+      checklist: [],
       sessionId: null,
       rev: 0,
       updatedAt: Date.now(),
@@ -108,27 +125,33 @@ export class Board {
   private insert(card: Card): void {
     this.db
       .prepare(
-        `INSERT INTO cards (id, key, title, body, status, tags, assignee, progress, external_id, session_id, rev, updated_at)
-         VALUES (@id, @key, @title, @body, @status, @tags, @assignee, @progress, @externalId, @sessionId, @rev, @updatedAt)
+        `INSERT INTO cards (id, key, title, body, status, tags, assignee, progress, external_id, external_ref, priority, milestone, checklist, session_id, rev, updated_at)
+         VALUES (@id, @key, @title, @body, @status, @tags, @assignee, @progress, @externalId, @externalRef, @priority, @milestone, @checklist, @sessionId, @rev, @updatedAt)
          ON CONFLICT(id) DO UPDATE SET
            key=excluded.key, title=excluded.title, body=excluded.body, status=excluded.status,
            tags=excluded.tags, assignee=excluded.assignee, progress=excluded.progress,
-           external_id=excluded.external_id, session_id=excluded.session_id, rev=excluded.rev, updated_at=excluded.updated_at`,
+           external_id=excluded.external_id, external_ref=excluded.external_ref, priority=excluded.priority,
+           milestone=excluded.milestone, checklist=excluded.checklist,
+           session_id=excluded.session_id, rev=excluded.rev, updated_at=excluded.updated_at`,
       )
-      .run({ ...card, tags: JSON.stringify(card.tags) });
+      .run({ ...card, tags: JSON.stringify(card.tags), checklist: JSON.stringify(card.checklist) });
   }
 }
 
 interface RawCard {
   id: string; key: string; title: string; body: string; status: string;
   tags: string; assignee: string | null; progress: number;
-  external_id: string | null; session_id: string | null; rev: number; updated_at: number;
+  external_id: string | null; external_ref: string | null; priority: string;
+  milestone: string | null; checklist: string;
+  session_id: string | null; rev: number; updated_at: number;
 }
 
 function hydrate(r: RawCard): Card {
   return Card.parse({
     id: r.id, key: r.key, title: r.title, body: r.body, status: r.status,
     tags: JSON.parse(r.tags) as string[], assignee: r.assignee, progress: r.progress,
-    externalId: r.external_id, sessionId: r.session_id, rev: r.rev, updatedAt: r.updated_at,
+    externalId: r.external_id, externalRef: r.external_ref, priority: r.priority,
+    milestone: r.milestone, checklist: JSON.parse(r.checklist || "[]") as unknown[],
+    sessionId: r.session_id, rev: r.rev, updatedAt: r.updated_at,
   });
 }
