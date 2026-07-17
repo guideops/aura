@@ -17,7 +17,7 @@ import { writeBrief } from "./brief.js";
 import { Board } from "./board.js";
 import { SkillRegistry, SkillValidationError } from "./skills.js";
 import { BoardProgress } from "./board-progress.js";
-import { SyncEngine, type ConflictReport } from "./github-sync.js";
+import { SyncEngine, type ConflictReport, type GitHubProjectClient } from "./github-sync.js";
 import { OctokitProjectClient } from "./github-client.js";
 import type { BoardMessage } from "@aura/core";
 
@@ -29,6 +29,8 @@ export interface DaemonOptions {
   daemonUrl?: string; // self URL injected into spawned sessions' hooks
   vaultDir?: string; // markdown vault root; defaults under cwd
   skillsDir?: string; // skills root (<dir>/<name>/SKILL.md); defaults under cwd
+  /** Test seam: provides the GitHub client for /api/github/link. Defaults to Octokit. */
+  githubClientFactory?: (cfg: { token: string; projectId: string }) => GitHubProjectClient;
 }
 
 export interface Daemon {
@@ -389,6 +391,7 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     for (const c of r.conflicts) reviewQueue.push(c);
     // Refresh board views for anything the sync changed.
     for (const card of board.list()) broadcast({ kind: "card.upsert", card });
+    if (reviewQueue.length) broadcast({ kind: "sync.conflicts", count: reviewQueue.length });
     return r;
   };
   const stopSyncTimer = () => {
@@ -409,9 +412,11 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     };
     if (!token || !projectId) return reply.code(400).send({ error: "token and projectId required" });
     syncEngine?.close();
+    const makeClient = options.githubClientFactory
+      ?? ((cfg: { token: string; projectId: string }) => new OctokitProjectClient(cfg));
     syncEngine = new SyncEngine(
       board,
-      new OctokitProjectClient({ token, projectId }),
+      makeClient({ token, projectId }),
       boardDbPath === ":memory:" ? ":memory:" : boardDbPath.replace(/\.board\.db$/, ".sync.db"),
     );
     stopSyncTimer();
@@ -440,6 +445,23 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
   app.post("/api/github/review/clear", async () => {
     reviewQueue.length = 0;
     return { ok: true };
+  });
+  // Resolve one conflict: "remote" just acknowledges (remote already applied);
+  // "local" re-asserts the local status — rev bump makes the next sync push it.
+  app.post("/api/github/review/resolve", async (req, reply) => {
+    const { cardId, choice } = (req.body ?? {}) as { cardId?: string; choice?: string };
+    const idx = reviewQueue.findIndex((c) => c.cardId === cardId);
+    if (idx === -1) return reply.code(404).send({ error: "no such conflict" });
+    if (choice !== "local" && choice !== "remote") {
+      return reply.code(400).send({ error: 'choice must be "local" or "remote"' });
+    }
+    const [conflict] = reviewQueue.splice(idx, 1);
+    if (choice === "local") {
+      const restored = board.update(conflict!.cardId, { status: conflict!.localStatus });
+      if (restored) broadcast({ kind: "card.upsert", card: restored });
+    }
+    broadcast({ kind: "sync.conflicts", count: reviewQueue.length });
+    return reply.send({ ok: true, remaining: reviewQueue.length });
   });
 
   app.addHook("onClose", async () => { stopSyncTimer(); vault.close(); board.close(); syncEngine?.close(); });

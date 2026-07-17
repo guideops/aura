@@ -41,5 +41,7 @@ export const DEFAULT_COLUMNS: Column[] = [
 export const BoardMessage = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("card.upsert"), card: Card }),
   z.object({ kind: z.literal("card.removed"), id: z.string() }),
+  /** GitHub sync resolved conflicts remote-wins; review queue has entries. */
+  z.object({ kind: z.literal("sync.conflicts"), count: z.number().int().nonnegative() }),
 ]);
 export type BoardMessage = z.infer<typeof BoardMessage>;

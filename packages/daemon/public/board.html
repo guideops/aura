@@ -40,6 +40,14 @@
   dialog button { border:0; border-radius:8px; padding:7px 14px; font-weight:600; cursor:pointer; }
   dialog .primary { background:#2563eb; color:#fff; }
   dialog .ghost { background:#eef1f5; color:var(--tx); }
+  #conflicts { display:none; margin:12px 16px 0; border:1px solid #fbbf24; background:#fffbeb; border-radius:10px; padding:10px 14px; }
+  #conflicts.show { display:block; }
+  #conflicts h4 { margin:0 0 6px; font-size:12px; color:#92400e; text-transform:uppercase; letter-spacing:.06em; }
+  .conflict { display:flex; align-items:center; gap:10px; padding:4px 0; font-size:12px; }
+  .conflict .what { flex:1; }
+  .conflict button { border:0; border-radius:6px; padding:4px 10px; font-size:11px; font-weight:600; cursor:pointer; }
+  .conflict .keep { background:#e5e7eb; }
+  .conflict .restore { background:#2563eb; color:#fff; }
 </style>
 </head>
 <body>
@@ -48,6 +56,7 @@
   <span class="grow"></span>
   <input id="new" placeholder="New card title… (Enter)" />
 </header>
+<div id="conflicts"><h4>Sync conflicts — GitHub won, review</h4><div id="conflict-list"></div></div>
 <main id="board"></main>
 <dialog id="assign">
   <h3 id="assign-title">Assign card</h3>
@@ -177,6 +186,33 @@ document.getElementById("assign-go").addEventListener("click", async () => {
   assignDlg.close();
 });
 
+async function loadConflicts() {
+  const s = await fetch("/api/github/status").then((r) => r.json()).catch(() => null);
+  const box = document.getElementById("conflicts");
+  const list = document.getElementById("conflict-list");
+  const queue = s?.reviewQueue ?? [];
+  box.classList.toggle("show", queue.length > 0);
+  list.innerHTML = "";
+  for (const c of queue) {
+    const card = cards.get(c.cardId);
+    const row = document.createElement("div");
+    row.className = "conflict";
+    row.innerHTML = `<span class="what"><b>${card ? escapeHtml(card.key) : c.cardId}</b>
+        local <b>${escapeHtml(c.localStatus)}</b> overridden by remote <b>${escapeHtml(c.remoteStatus)}</b></span>
+      <button class="keep">keep remote</button><button class="restore">restore local</button>`;
+    const resolve = async (choice) => {
+      await fetch("/api/github/review/resolve", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cardId: c.cardId, choice }),
+      });
+      loadConflicts();
+    };
+    row.querySelector(".keep").addEventListener("click", () => resolve("remote"));
+    row.querySelector(".restore").addEventListener("click", () => resolve("local"));
+    list.appendChild(row);
+  }
+}
+
 async function boot() {
   const [res, sk] = await Promise.all([
     fetch("/api/board/cards").then((r) => r.json()),
@@ -186,6 +222,7 @@ async function boot() {
   skillNames = new Set(skillList.map((s) => s.meta.name));
   for (const c of res.cards) cards.set(c.id, c);
   render();
+  loadConflicts();
   connect();
 }
 function connect() {
@@ -196,6 +233,7 @@ function connect() {
     const msg = JSON.parse(m.data);
     if (msg.kind === "card.upsert") { cards.set(msg.card.id, msg.card); render(); }
     else if (msg.kind === "card.removed") { cards.delete(msg.id); render(); }
+    else if (msg.kind === "sync.conflicts") { loadConflicts(); }
   };
 }
 window.__auraBoard = { cards };
