@@ -3,6 +3,8 @@ dist/
 .turbo/
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 .env
 assets/raw/
 vault/briefs/

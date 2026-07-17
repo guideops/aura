@@ -4,14 +4,23 @@ Visual office for AI agents. Your coding agents become characters in an isometri
 desks are running sessions, the kanban wall syncs GitHub Projects, the security gate is a real
 permission boundary, and the vault is your markdown memory.
 
-**Status: Phase 1 (core daemon) — working.** See `PLAN` in project docs for the roadmap.
+**Status: Phases 1–6 working** — core daemon, office scene, vault memory, kanban board,
+GitHub Projects sync, skills registry, Electron shell.
 
 ## Layout
 
-- `packages/core` — protocol types & zod schemas (`AgentEvent`, `.space`, `permissions.yaml`, `skill.md`)
-- `packages/daemon` — Fastify daemon: hook ingress, WebSocket broadcast, SQLite event log, guardrail engine
-- `packages/adapters/claude-code` — Claude Code hook normalizer + settings installer
+- `packages/core` — protocol types & zod schemas (`AgentEvent`, `.space`, `permissions.yaml`, `skill.md`, `Card`)
+- `packages/daemon` — Fastify daemon: hook ingress, WebSocket broadcast, SQLite event log, guardrail engine, vault (markdown memory + FTS5 + live watch), kanban board, skills registry, GitHub Projects v2 sync, session spawner
+- `packages/adapters/claude-code` — Claude Code hook normalizer + transcript watcher + settings installer
+- `packages/desktop` — Electron shell: daemon child process, safeStorage-encrypted GitHub token, settings UI
 - `fixtures/` — recorded hook payloads for deterministic replay tests
+- `skills/` — example agent skills (`<name>/SKILL.md`, agentskills.io layout)
+- `vault/` — dev vault (Obsidian-compatible markdown; graph view at `/graph.html`)
+
+## UI pages
+
+`/office.html` isometric office · `/board.html` kanban (dblclick card → assign + skill picker) ·
+`/graph.html` live vault graph · `/index.html` debug console
 
 ## Run
 
