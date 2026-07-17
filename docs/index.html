@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AURA — mission control for your AI agents</title>
+<meta name="description" content="A local-first command center for AI agents: 3D office visualization, kanban with GitHub sync, approval guardrails, Obsidian-native memory, live terminals." />
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #111827; background: #fff; line-height: 1.6; }
+  a { color: inherit; text-decoration: none; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 20px 0; }
+  .logo { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+  .logo .mark { width: 30px; height: 30px; border-radius: 9px; background: #1c2230; color: #8ccfff; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+  nav { display: flex; gap: 14px; align-items: center; font-size: 14px; }
+  nav a.plain { color: #6b7280; }
+  nav a.plain:hover { color: #111827; }
+  .btn { display: inline-block; border-radius: 10px; padding: 12px 24px; font-size: 14px; font-weight: 500; }
+  .btn.primary { background: #111827; color: #fff; }
+  .btn.primary:hover { background: #374151; }
+  .btn.ghost { border: 1px solid #d1d5db; color: #374151; }
+  .btn.ghost:hover { border-color: #9ca3af; }
+  .btn.small { padding: 8px 16px; }
+  .hero { text-align: center; padding: 72px 0 88px; }
+  .pill { display: inline-block; border: 1px solid #e5e7eb; border-radius: 999px; padding: 4px 14px; font-size: 12px; color: #6b7280; margin-bottom: 18px; }
+  h1 { font-size: clamp(32px, 5vw, 48px); font-weight: 600; letter-spacing: -0.02em; max-width: 760px; margin: 0 auto; line-height: 1.15; }
+  .sub { max-width: 620px; margin: 20px auto 0; font-size: 18px; color: #6b7280; }
+  .ctas { margin-top: 34px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .note { margin-top: 12px; font-size: 12px; color: #9ca3af; }
+  .band { border-top: 1px solid #f3f4f6; background: #f9fafb; padding: 64px 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 22px; }
+  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 24px; }
+  .card .ico { font-size: 20px; }
+  .card h3 { margin: 12px 0 8px; font-size: 15.5px; }
+  .card p { margin: 0; font-size: 14px; color: #6b7280; }
+  .section { text-align: center; padding: 72px 0; }
+  .section h2 { font-size: 26px; font-weight: 600; margin: 0; }
+  .section p { max-width: 600px; margin: 14px auto 0; color: #6b7280; }
+  .stack { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 26px; font-size: 12.5px; color: #6b7280; }
+  .stack span { border: 1px solid #e5e7eb; border-radius: 999px; padding: 4px 12px; }
+  footer { border-top: 1px solid #f3f4f6; padding: 30px 0; text-align: center; font-size: 12px; color: #9ca3af; }
+  footer a { color: #9ca3af; } footer a:hover { color: #4b5563; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo"><span class="mark">◉‿◉</span> AURA</div>
+    <nav>
+      <a class="plain" href="https://github.com/guideops/aura">GitHub</a>
+      <a class="btn primary small" href="https://github.com/guideops/aura/releases/latest/download/AURA-Setup-0.1.0.exe">Download</a>
+    </nav>
+  </header>
+</div>
+
+<main>
+  <section class="hero wrap">
+    <span class="pill">Local-first · provider-agnostic · Obsidian-native</span>
+    <h1>Mission control for your AI agents</h1>
+    <p class="sub">
+      AURA turns a swarm of coding and research agents into something you can actually watch,
+      steer and stop — a 3D office where every agent is a robot at a desk, every risky tool call
+      waits at a security gate, and every decision lands on one kanban board.
+    </p>
+    <div class="ctas">
+      <a class="btn primary" href="https://github.com/guideops/aura/releases/latest/download/AURA-Setup-0.1.0.exe">Download for Windows</a>
+      <a class="btn ghost" href="https://github.com/guideops/aura">View on GitHub</a>
+    </div>
+    <p class="note">Free · one-click installer · runs entirely on your machine · unsigned build (SmartScreen: More info → Run anyway)</p>
+  </section>
+
+  <section class="band">
+    <div class="wrap grid">
+      <div class="card">
+        <div class="ico">🏢</div>
+        <h3>A live 3D office, not a log file</h3>
+        <p>Every agent is a robot with a status: at a desk when working, at the security gate when blocked, at the council table in review. Rearrange the whole office in the built-in Space CAD editor — agents follow the furniture.</p>
+      </div>
+      <div class="card">
+        <div class="ico">🛡️</div>
+        <h3>Approval guardrails</h3>
+        <p>Dangerous tool calls pause the agent and light up the gate. Approve or deny from the office; the agent resumes or backs off. Policy by architecture, not by prompt.</p>
+      </div>
+      <div class="card">
+        <div class="ico">📋</div>
+        <h3>One kanban, synced to GitHub</h3>
+        <p>Cards spawn real agent sessions with equipped skills. Progress animates live, review lands automatically, and two-way GitHub Projects sync keeps the team's board honest.</p>
+      </div>
+      <div class="card">
+        <div class="ico">🗂️</div>
+        <h3>Obsidian-native memory</h3>
+        <p>Agent memory is plain markdown in a folder Obsidian can open. Full-text search, wikilink graph, auto-written daily briefs — and one-click vault adoption from paired apps.</p>
+      </div>
+      <div class="card">
+        <div class="ico">🖥️</div>
+        <h3>Terminals and usage, live</h3>
+        <p>Per-session terminal streaming, a colored event log, per-model token tracking and system health — the IDE-style command center around the office.</p>
+      </div>
+      <div class="card">
+        <div class="ico">🔗</div>
+        <h3>Pairs with your stack</h3>
+        <p>Provider-agnostic by design: Claude Code sessions out of the box, Nous Hermes via API, and a 6-digit pairing flow so companion apps stream their agents into the same office.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section wrap">
+    <h2>Running in minutes</h2>
+    <p>
+      Download, run the installer, and AURA boots its own local daemon — no accounts, no cloud.
+      Point it at your Obsidian vault, drop a card on the board, and watch the first robot walk
+      to its desk.
+    </p>
+    <div class="ctas">
+      <a class="btn primary" href="https://github.com/guideops/aura/releases/latest/download/AURA-Setup-0.1.0.exe">Download for Windows</a>
+    </div>
+    <div class="stack">
+      <span>Electron + local daemon</span><span>Three.js office</span><span>SQLite</span>
+      <span>Claude Code hooks</span><span>Hermes API</span><span>GitHub Projects</span>
+    </div>
+  </section>
+</main>
+
+<footer>
+  AURA · <a href="https://github.com/guideops/aura">GitHub</a> ·
+  <a href="https://github.com/guideops/aura/releases">Releases</a>
+</footer>
+</body>
+</html>
