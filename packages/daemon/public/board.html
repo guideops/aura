@@ -60,6 +60,10 @@
 <main id="board"></main>
 <dialog id="assign">
   <h3 id="assign-title">Assign card</h3>
+  <label for="edit-title">Title</label>
+  <input type="text" id="edit-title" />
+  <label for="edit-body">Body</label>
+  <textarea id="edit-body" rows="3" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;resize:vertical"></textarea>
   <label for="assign-agent">Agent id</label>
   <input type="text" id="assign-agent" placeholder="blue-1 (optional)" />
   <label for="assign-cwd">Working directory (spawns session)</label>
@@ -67,8 +71,9 @@
   <label>Skills</label>
   <div id="assign-skills"><span class="desc">none registered</span></div>
   <menu>
+    <button class="ghost" id="card-delete" style="margin-right:auto;background:#fee2e2;color:#991b1b">Delete</button>
     <button class="ghost" id="assign-cancel">Cancel</button>
-    <button class="primary" id="assign-go">Assign</button>
+    <button class="primary" id="assign-go">Save</button>
   </menu>
 </dialog>
 <script type="module">
@@ -156,7 +161,9 @@ function openAssign(id) {
   const c = cards.get(id);
   if (!c) return;
   assignCardId = id;
-  document.getElementById("assign-title").textContent = `Assign ${c.key} — ${c.title}`;
+  document.getElementById("assign-title").textContent = `${c.key}`;
+  document.getElementById("edit-title").value = c.title;
+  document.getElementById("edit-body").value = c.body ?? "";
   document.getElementById("assign-agent").value = c.assignee ?? "";
   const skillsEl = document.getElementById("assign-skills");
   if (skillList.length) {
@@ -171,6 +178,17 @@ function openAssign(id) {
 }
 document.getElementById("assign-cancel").addEventListener("click", () => assignDlg.close());
 document.getElementById("assign-go").addEventListener("click", async () => {
+  // Persist title/body edits first.
+  const title = document.getElementById("edit-title").value.trim();
+  const cardBody = document.getElementById("edit-body").value;
+  const existing = cards.get(assignCardId);
+  if (existing && (title !== existing.title || cardBody !== existing.body)) {
+    const patch = await fetch(`/api/board/cards/${assignCardId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: title || existing.title, body: cardBody }),
+    });
+    if (!patch.ok) { alert((await patch.json()).error ?? patch.status); return; }
+  }
   const body = {};
   const agentId = document.getElementById("assign-agent").value.trim();
   const cwd = document.getElementById("assign-cwd").value.trim();
@@ -178,10 +196,19 @@ document.getElementById("assign-go").addEventListener("click", async () => {
   if (cwd) body.cwd = cwd;
   const picked = [...document.querySelectorAll("#assign-skills input:checked")].map((i) => i.value);
   if (picked.length) body.skills = picked;
-  const res = await fetch(`/api/board/cards/${assignCardId}/assign`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  if (agentId || cwd || picked.length) {
+    const res = await fetch(`/api/board/cards/${assignCardId}/assign`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) { alert((await res.json()).error ?? res.status); return; }
+  }
+  assignDlg.close();
+});
+document.getElementById("card-delete").addEventListener("click", async () => {
+  const c = cards.get(assignCardId);
+  if (!c || !confirm(`Delete ${c.key} — ${c.title}?`)) return;
+  const res = await fetch(`/api/board/cards/${assignCardId}`, { method: "DELETE" });
   if (!res.ok) { alert((await res.json()).error ?? res.status); return; }
   assignDlg.close();
 });

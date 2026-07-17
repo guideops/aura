@@ -18,10 +18,26 @@ if (process.env["AURA_SKILLS"]) daemonOptions.skillsDir = process.env["AURA_SKIL
 const daemon = createDaemon(daemonOptions);
 
 const permissionsPath = process.env["AURA_PERMISSIONS"] ?? path.join(process.cwd(), "permissions.yaml");
-if (fs.existsSync(permissionsPath)) {
+const loadGuardrails = () => {
   daemon.guardrails.loadYaml(fs.readFileSync(permissionsPath, "utf8"));
   // eslint-disable-next-line no-console
   console.log(`[aura] guardrails loaded from ${permissionsPath}`);
+};
+if (fs.existsSync(permissionsPath)) {
+  loadGuardrails();
+  // Hot-reload on edit; debounce collapses editor write bursts.
+  let reloadTimer: NodeJS.Timeout | null = null;
+  fs.watch(permissionsPath, () => {
+    if (reloadTimer) clearTimeout(reloadTimer);
+    reloadTimer = setTimeout(() => {
+      reloadTimer = null;
+      try { loadGuardrails(); } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error(`[aura] guardrail reload failed (keeping previous rules):`, err);
+      }
+    }, 300);
+    reloadTimer.unref?.();
+  });
 }
 
 // Transcript fallback: observes sessions without hooks + token usage for all.

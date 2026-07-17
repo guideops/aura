@@ -31,7 +31,10 @@
 </style>
 </head>
 <body>
-<header><b>AURA</b><span id="conn">connecting…</span><span id="count"></span><a href="/graph.html" style="color:#8b98a9;text-decoration:none">graph</a></header>
+<header><b>AURA</b><span id="conn">connecting…</span><span id="count"></span>
+  <a href="/graph.html" style="color:#8b98a9;text-decoration:none">graph</a>
+  <button id="brief" style="margin-left:auto;border:0;border-radius:8px;padding:4px 12px;background:#22303f;color:#dbe2ea;font:inherit;cursor:pointer">brief now</button>
+</header>
 <main>
   <div id="agents"></div>
   <div id="log"></div>
@@ -84,6 +87,13 @@
     };
   }
   connect();
+
+  document.getElementById("brief").addEventListener("click", async (e) => {
+    e.target.textContent = "writing…";
+    const r = await fetch("/api/vault/brief", { method: "POST" }).then((x) => x.json()).catch(() => null);
+    e.target.textContent = r?.slug ? `brief → ${r.slug}` : "failed";
+    setTimeout(() => { e.target.textContent = "brief now"; }, 3000);
+  });
 </script>
 </body>
 </html>
