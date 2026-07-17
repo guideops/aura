@@ -466,6 +466,89 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     return reply.send({ ok: true, remaining: reviewQueue.length });
   });
 
+  // ---- Shell (command-center UI) data endpoints ----
+
+  // Vault folder tree: nested {name, slug?, children} built from note slugs.
+  app.get("/api/vault/tree", async () => {
+    interface TreeNode { name: string; slug?: string; children: TreeNode[] }
+    const root: TreeNode = { name: "vault", children: [] };
+    for (const note of vault.list()) {
+      const parts = note.slug.split("/");
+      let node = root;
+      for (let i = 0; i < parts.length - 1; i++) {
+        let child = node.children.find((c) => c.name === parts[i] && !c.slug);
+        if (!child) { child = { name: parts[i]!, children: [] }; node.children.push(child); }
+        node = child;
+      }
+      node.children.push({ name: note.title || parts.at(-1)!, slug: note.slug, children: [] });
+    }
+    const sort = (n: TreeNode) => {
+      n.children.sort((a, b) =>
+        Number(!!a.slug) - Number(!!b.slug) || a.name.localeCompare(b.name));
+      n.children.forEach(sort);
+    };
+    sort(root);
+    return { tree: root.children };
+  });
+
+  // Per-model token usage aggregated from live agent snapshots.
+  app.get("/api/usage", async () => {
+    const byModel = new Map<string, { model: string; tokens: number; agents: number }>();
+    for (const a of store.list()) {
+      for (const [model, tokens] of Object.entries(a.tokens.byModel)) {
+        const row = byModel.get(model) ?? { model, tokens: 0, agents: 0 };
+        row.tokens += tokens;
+        row.agents += 1;
+        byModel.set(model, row);
+      }
+    }
+    const models = [...byModel.values()].sort((x, y) => y.tokens - x.tokens);
+    const total = models.reduce((s, m) => s + m.tokens, 0);
+    return { models, total };
+  });
+
+  const startedAt = Date.now();
+  let gitCache: { at: number; branch: string | null } | null = null;
+  const gitBranch = async (): Promise<string | null> => {
+    if (gitCache && Date.now() - gitCache.at < 10_000) return gitCache.branch;
+    const branch = await new Promise<string | null>((resolve) => {
+      import("node:child_process").then(({ execFile }) => {
+        execFile("git", ["rev-parse", "--abbrev-ref", "HEAD"], { timeout: 2000 }, (err, out) =>
+          resolve(err ? null : out.trim()));
+      }).catch(() => resolve(null));
+    });
+    gitCache = { at: Date.now(), branch };
+    return branch;
+  };
+
+  // One-shot status for right-hand panels + status bar.
+  app.get("/api/status", async () => {
+    const agents = store.list();
+    const cards = board.list();
+    return {
+      orchestration: {
+        heartbeatMs: 30_000,
+        uptimeMs: Date.now() - startedAt,
+        agentsOnline: agents.filter((a) => a.status !== "offline").length,
+        agentsTotal: agents.length,
+        tasksPending: cards.filter((c) => c.status === "backlog" || c.status === "in_progress").length,
+        tasksTotal: cards.length,
+        eventsLogged: log.recent().length,
+        sessionsRunning: sessions.list().filter((s) => s.status === "running").length,
+        approvalsPending: guardrails.pendingRequests.length,
+      },
+      services: {
+        daemon: { ok: true, version: SERVER_VERSION },
+        vault: { ok: true, notes: vault.list().length },
+        board: { ok: true, cards: cards.length },
+        github: { ok: syncEngine !== null, linked: syncEngine !== null, lastSync },
+        sessions: { ok: true, running: sessions.list().filter((s) => s.status === "running").length },
+      },
+      git: { branch: await gitBranch() },
+      problems: guardrails.pendingRequests.length + reviewQueue.length,
+    };
+  });
+
   app.addHook("onClose", async () => { stopSyncTimer(); vault.close(); board.close(); syncEngine?.close(); });
 
   return { app, bus, store, log, guardrails, vault, board, skills, hookSessions };

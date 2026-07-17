@@ -91,7 +91,7 @@ function createWindow(): BrowserWindow {
       nodeIntegration: false,
     },
   });
-  void win.loadURL(`${BASE}/office.html`);
+  void win.loadURL(`${BASE}/app/index.html`);
   return win;
 }
 
@@ -137,9 +137,9 @@ app.whenReady().then(async () => {
 
   const main = createWindow();
   const pages = [
+    { label: "Command Center", page: "app/index.html" },
     { label: "Office", page: "office.html" },
     { label: "Board", page: "board.html" },
-    { label: "Vault Graph", page: "graph.html" },
     { label: "Console", page: "index.html" },
   ];
   const menu = Menu.buildFromTemplate([

@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AURA — Command Center</title>
+<link rel="stylesheet" href="app.css" />
+</head>
+<body>
+<div id="shell">
+  <!-- Icon rail -->
+  <nav id="rail">
+    <button class="rail-btn active" data-view="office" title="Explore">
+      <svg viewBox="0 0 24 24"><path d="M12 3 2 9l10 6 10-6-10-6Zm-7 9.5v4L12 21l7-4.5v-4"/></svg>
+      <span>Explore</span>
+    </button>
+    <button class="rail-btn" data-action="palette" title="Search">
+      <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg>
+      <span>Search</span>
+    </button>
+    <button class="rail-btn" data-view="board" title="Board">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="5" height="13" rx="1"/></svg>
+      <span>Board</span>
+    </button>
+    <button class="rail-btn" data-view="source" title="Source Control">
+      <svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-4 3-8 4"/></svg>
+      <span>Source</span>
+    </button>
+    <button class="rail-btn" data-view="sessions" title="Executions">
+      <svg viewBox="0 0 24 24"><path d="m7 6 6 6-6 6M14 18h6"/></svg>
+      <span>Executions</span>
+    </button>
+    <div class="rail-spacer"></div>
+    <div id="rail-avatar" title="AURA daemon">
+      <div class="avatar-bot">◉‿◉</div>
+      <span id="rail-conn" class="conn-dot off"></span>
+      <span class="rail-conn-label" id="rail-conn-label">Offline</span>
+    </div>
+  </nav>
+
+  <!-- Explorer -->
+  <aside id="explorer">
+    <div class="panel-head">EXPLORER <button id="explorer-refresh" title="Refresh">↻</button></div>
+    <div id="tree" class="tree-scroll">
+      <div class="tree-section" data-section="workspace">
+        <div class="tree-caret open">AURA WORKSPACE</div>
+        <div class="tree-body">
+          <div class="tree-section" data-section="agents">
+            <div class="tree-caret open">agents</div>
+            <div class="tree-body" id="tree-agents"></div>
+          </div>
+          <div class="tree-section" data-section="vault">
+            <div class="tree-caret open">vault</div>
+            <div class="tree-body" id="tree-vault"></div>
+          </div>
+          <div class="tree-section" data-section="skills">
+            <div class="tree-caret open">memory / skills</div>
+            <div class="tree-body" id="tree-skills"></div>
+          </div>
+          <div class="tree-section" data-section="sessions">
+            <div class="tree-caret">executions</div>
+            <div class="tree-body" id="tree-sessions"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="tree-foot">
+      <div class="tree-caret">OUTLINE</div>
+      <div class="tree-caret">TIMELINE</div>
+    </div>
+  </aside>
+
+  <!-- Main column -->
+  <main id="main">
+    <div id="topbar">
+      <button id="cmd-input" title="Command palette (Ctrl+K)">
+        <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg>
+        <span>Type a command or search…</span>
+        <kbd>Ctrl K</kbd>
+      </button>
+    </div>
+
+    <div id="stage">
+      <!-- Views -->
+      <iframe id="view-office" class="view active" src="/office.html?embed=1" title="Office"></iframe>
+      <iframe id="view-board" class="view" data-src="/board.html" title="Board"></iframe>
+      <section id="view-sessions" class="view pane">
+        <h2>Executions</h2>
+        <div id="sessions-list" class="cardlist"></div>
+      </section>
+      <section id="view-source" class="view pane">
+        <h2>Source Control — GitHub Projects Sync</h2>
+        <div id="github-status" class="cardlist"></div>
+        <div class="row-btns">
+          <button id="gh-sync" class="btn">Sync now</button>
+        </div>
+      </section>
+      <section id="view-skills" class="view pane">
+        <h2 id="skill-title">Skill</h2>
+        <pre id="skill-body" class="doc"></pre>
+      </section>
+      <section id="view-note" class="view pane">
+        <h2 id="note-title">Note</h2>
+        <textarea id="note-body" spellcheck="false"></textarea>
+        <div class="row-btns">
+          <button id="note-save" class="btn primary">Save</button>
+        </div>
+      </section>
+
+      <!-- Usage Tracking overlay -->
+      <div id="usage" class="float-card">
+        <div class="float-head">Usage Tracking <span id="usage-total" class="dim"></span></div>
+        <div id="usage-rows"></div>
+      </div>
+
+      <!-- Approvals overlay -->
+      <div id="approvals" class="float-stack"></div>
+    </div>
+
+    <!-- Bottom dock row -->
+    <div id="dockrow">
+      <section id="dock" class="dock-panel">
+        <div class="dock-tabs">
+          <button class="dock-tab active" data-tab="events">EVENT LOG</button>
+          <button class="dock-tab" data-tab="problems">PROBLEMS <span id="problems-count" class="badge" hidden></span></button>
+          <button class="dock-tab" data-tab="output">OUTPUT</button>
+          <span class="dock-spacer"></span>
+          <select id="dock-agent-filter"><option value="">all agents</option></select>
+        </div>
+        <div id="dock-events" class="dock-body log"></div>
+        <div id="dock-problems" class="dock-body" hidden></div>
+        <div id="dock-output" class="dock-body log" hidden></div>
+      </section>
+      <section class="side-panel">
+        <div class="float-head">Orchestration Status</div>
+        <div id="orch-rows" class="kv"></div>
+        <div class="bar"><div id="orch-bar"></div></div>
+      </section>
+      <section class="side-panel">
+        <div class="float-head">System Services</div>
+        <div id="svc-rows" class="kv"></div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<!-- Status bar -->
+<footer id="statusbar">
+  <span id="sb-branch" class="sb-item">⎇ —</span>
+  <span id="sb-problems" class="sb-item">⚠ 0</span>
+  <span id="sb-agents" class="sb-item">agents: 0</span>
+  <span class="sb-spacer"></span>
+  <span class="sb-item">UTF-8</span>
+  <span class="sb-item">LF</span>
+  <span id="sb-conn" class="sb-item">AURA: Connecting…</span>
+  <span id="sb-bell" class="sb-item" title="Pending approvals">🔔</span>
+</footer>
+
+<!-- Command palette -->
+<div id="palette-overlay" hidden>
+  <div id="palette">
+    <input id="palette-input" placeholder="Type a command or search vault…" autocomplete="off" />
+    <div id="palette-results"></div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
