@@ -13,3 +13,5 @@ vault/briefs/
 *.sync.db
 *.sync.db-*
 office.space.json
+aura.peers.json
+aura.config.json
