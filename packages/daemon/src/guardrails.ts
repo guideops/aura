@@ -57,6 +57,38 @@ export class GuardrailEngine {
     return { action: this.config.default, reason: "default policy" };
   }
 
+  /**
+   * Peer-submitted approval request (Agentic Workspace integration, step D).
+   * Parks the request exactly like an "ask" rule hit; the operator resolves it
+   * via the same POST /api/approvals/:id surface, and the peer polls get().
+   */
+  request(input: {
+    agentId: string;
+    sessionId: string;
+    tool: string;
+    inputPreview: string;
+    reason?: string;
+  }): ActionRequest {
+    const request: ActionRequest = {
+      id: ulid(),
+      ts: Date.now(),
+      agentId: input.agentId,
+      sessionId: input.sessionId,
+      tool: input.tool,
+      inputPreview: input.inputPreview.slice(0, 500),
+      reason: input.reason ?? "operator approval required",
+      impact: "medium",
+      status: "pending",
+      resolvedAt: null,
+    };
+    this.pending.set(request.id, request);
+    return request;
+  }
+
+  get(requestId: string): ActionRequest | undefined {
+    return this.pending.get(requestId);
+  }
+
   resolve(requestId: string, approved: boolean): ActionRequest | undefined {
     const request = this.pending.get(requestId);
     if (!request || request.status !== "pending") return undefined;

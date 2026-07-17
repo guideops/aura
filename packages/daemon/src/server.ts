@@ -608,6 +608,40 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     return reply.send({ ok: true, peer: info });
   });
 
+  // Peer approval handbrake (Agentic Workspace integration, step D): a paired
+  // peer parks a dangerous tool call here, the operator approves/denies it in
+  // the office UI (same POST /api/approvals/:id surface), and the peer polls
+  // the request by id until it resolves.
+  app.post("/api/peer/approvals/request", async (req, reply) => {
+    const peer = bearerPeer(req);
+    if (!peer) return reply.code(401).send({ error: "pairing token required" });
+    const { agentId, sessionId, tool, inputPreview, reason } = (req.body ?? {}) as {
+      agentId?: string;
+      sessionId?: string;
+      tool?: string;
+      inputPreview?: string;
+      reason?: string;
+    };
+    if (!tool) return reply.code(400).send({ error: "tool required" });
+    const request = guardrails.request({
+      agentId: agentId ?? peer.name,
+      sessionId: sessionId ?? "",
+      tool,
+      inputPreview: inputPreview ?? "",
+      ...(reason !== undefined ? { reason } : {}),
+    });
+    broadcast({ kind: "approval.pending", request });
+    return reply.send({ id: request.id, request });
+  });
+  app.get("/api/peer/approvals/:id", async (req, reply) => {
+    const peer = bearerPeer(req);
+    if (!peer) return reply.code(401).send({ error: "pairing token required" });
+    const { id } = req.params as { id: string };
+    const request = guardrails.get(id);
+    if (!request) return reply.code(404).send({ error: "unknown request" });
+    return reply.send({ request });
+  });
+
   // Vault folder management (Connections panel; "adopt peer's vault").
   app.get("/api/vault/dir", async () => ({ dir: vault.rootDir }));
   app.post("/api/vault/dir", async (req, reply) => {
