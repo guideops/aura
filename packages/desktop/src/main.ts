@@ -63,7 +63,7 @@ async function relinkGitHub(): Promise<boolean> {
   const res = await fetch(`${BASE}/api/github/link`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(link),
+    body: JSON.stringify({ ...link, intervalMs: 60_000 }), // desktop defaults to auto-sync
   });
   return res.ok;
 }

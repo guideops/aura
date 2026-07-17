@@ -378,15 +378,35 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
   // Electron builds inject it via OS keychain (safeStorage) at Phase 6.
   let syncEngine: SyncEngine | null = null;
   let lastSync: { at: number; conflicts: number; applied: number } | null = null;
+  let syncTimer: NodeJS.Timeout | null = null;
+  let syncIntervalMs = 0; // 0 = manual only
   const reviewQueue: ConflictReport[] = [];
+
+  const runSync = async () => {
+    if (!syncEngine) throw new Error("not linked");
+    const r = await syncEngine.syncOnce();
+    lastSync = { at: Date.now(), conflicts: r.conflicts.length, applied: r.applied };
+    for (const c of r.conflicts) reviewQueue.push(c);
+    // Refresh board views for anything the sync changed.
+    for (const card of board.list()) broadcast({ kind: "card.upsert", card });
+    return r;
+  };
+  const stopSyncTimer = () => {
+    if (syncTimer) clearInterval(syncTimer);
+    syncTimer = null;
+    syncIntervalMs = 0;
+  };
 
   app.get("/api/github/status", async () => ({
     linked: syncEngine !== null,
     lastSync,
+    intervalMs: syncIntervalMs,
     reviewQueue,
   }));
   app.post("/api/github/link", async (req, reply) => {
-    const { token, projectId } = (req.body ?? {}) as { token?: string; projectId?: string };
+    const { token, projectId, intervalMs } = (req.body ?? {}) as {
+      token?: string; projectId?: string; intervalMs?: number;
+    };
     if (!token || !projectId) return reply.code(400).send({ error: "token and projectId required" });
     syncEngine?.close();
     syncEngine = new SyncEngine(
@@ -394,17 +414,25 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
       new OctokitProjectClient({ token, projectId }),
       boardDbPath === ":memory:" ? ":memory:" : boardDbPath.replace(/\.board\.db$/, ".sync.db"),
     );
-    return reply.send({ ok: true });
+    stopSyncTimer();
+    // Auto-sync: floor 15s to stay far from GitHub secondary rate limits.
+    if (typeof intervalMs === "number" && intervalMs > 0) {
+      syncIntervalMs = Math.max(15_000, Math.round(intervalMs));
+      syncTimer = setInterval(() => { runSync().catch(() => { /* surfaces via status */ }); }, syncIntervalMs);
+      syncTimer.unref?.();
+    }
+    return reply.send({ ok: true, intervalMs: syncIntervalMs });
+  });
+  app.post("/api/github/unlink", async () => {
+    stopSyncTimer();
+    syncEngine?.close();
+    syncEngine = null;
+    return { ok: true };
   });
   app.post("/api/github/sync", async (_req, reply) => {
     if (!syncEngine) return reply.code(409).send({ error: "not linked" });
     try {
-      const r = await syncEngine.syncOnce();
-      lastSync = { at: Date.now(), conflicts: r.conflicts.length, applied: r.applied };
-      for (const c of r.conflicts) reviewQueue.push(c);
-      // Refresh board views for anything the sync changed.
-      for (const card of board.list()) broadcast({ kind: "card.upsert", card });
-      return reply.send({ ...r });
+      return reply.send({ ...(await runSync()) });
     } catch (err) {
       return reply.code(502).send({ error: String((err as Error).message) });
     }
@@ -414,7 +442,7 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     return { ok: true };
   });
 
-  app.addHook("onClose", async () => { vault.close(); board.close(); syncEngine?.close(); });
+  app.addHook("onClose", async () => { stopSyncTimer(); vault.close(); board.close(); syncEngine?.close(); });
 
   return { app, bus, store, log, guardrails, vault, board, skills, hookSessions };
 }
