@@ -58,6 +58,35 @@ describe("BoardProgress", () => {
     expect(done.progress).toBe(100);
   });
 
+  it("binds sessionId from session.start cwd and prefers it over assignee", () => {
+    const { board, bp, card } = setup();
+    bp.expectSession(card.id, "C:\\work\\Repo");
+    bp.apply(ev({
+      type: "session.start",
+      sessionId: "claude-sess-9",
+      agentId: "green-7",
+      data: { cwd: "c:/work/repo/" }, // separators + trailing slash + case normalize
+    }));
+    const bound = board.get(card.id)!;
+    expect(bound.sessionId).toBe("claude-sess-9");
+    expect(bound.assignee).toBe("green-7");
+
+    // Progress now keys on sessionId even though agentId differs from setup's.
+    bp.apply(ev({ type: "tool.use", sessionId: "claude-sess-9", agentId: "green-7" }));
+    expect(board.get(card.id)!.progress).toBeGreaterThan(0);
+    // Different session, different agent → no match, no movement.
+    const before = board.get(card.id)!.progress;
+    bp.apply(ev({ type: "tool.use", sessionId: "other", agentId: "stranger" }));
+    expect(board.get(card.id)!.progress).toBe(before);
+  });
+
+  it("expired expectSession does not bind", () => {
+    const { board, bp, card } = setup();
+    bp.expectSession(card.id, "/tmp/x", -1); // already expired
+    bp.apply(ev({ type: "session.start", sessionId: "late", data: { cwd: "/tmp/x" } }));
+    expect(board.get(card.id)!.sessionId).toBeNull();
+  });
+
   it("ignores agents with no assigned card and cards not in_progress", () => {
     const { board, bp, emitted } = setup();
     const backlog = board.create({ title: "Later" });

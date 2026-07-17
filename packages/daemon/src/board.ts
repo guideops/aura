@@ -33,12 +33,15 @@ export class Board {
         assignee TEXT,
         progress INTEGER NOT NULL DEFAULT 0,
         external_id TEXT,
+        session_id TEXT,
         rev INTEGER NOT NULL DEFAULT 0,
         updated_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_cards_status ON cards(status);
       CREATE INDEX IF NOT EXISTS idx_cards_external ON cards(external_id);
     `);
+    // Migration for boards created before session binding existed.
+    try { this.db.exec("ALTER TABLE cards ADD COLUMN session_id TEXT"); } catch { /* exists */ }
     const maxKey = this.db
       .prepare("SELECT key FROM cards WHERE key LIKE 'AURA-%' ORDER BY CAST(SUBSTR(key,6) AS INTEGER) DESC LIMIT 1")
       .get() as { key: string } | undefined;
@@ -68,6 +71,7 @@ export class Board {
       assignee: null,
       progress: 0,
       externalId: null,
+      sessionId: null,
       rev: 0,
       updatedAt: Date.now(),
     });
@@ -104,12 +108,12 @@ export class Board {
   private insert(card: Card): void {
     this.db
       .prepare(
-        `INSERT INTO cards (id, key, title, body, status, tags, assignee, progress, external_id, rev, updated_at)
-         VALUES (@id, @key, @title, @body, @status, @tags, @assignee, @progress, @externalId, @rev, @updatedAt)
+        `INSERT INTO cards (id, key, title, body, status, tags, assignee, progress, external_id, session_id, rev, updated_at)
+         VALUES (@id, @key, @title, @body, @status, @tags, @assignee, @progress, @externalId, @sessionId, @rev, @updatedAt)
          ON CONFLICT(id) DO UPDATE SET
            key=excluded.key, title=excluded.title, body=excluded.body, status=excluded.status,
            tags=excluded.tags, assignee=excluded.assignee, progress=excluded.progress,
-           external_id=excluded.external_id, rev=excluded.rev, updated_at=excluded.updated_at`,
+           external_id=excluded.external_id, session_id=excluded.session_id, rev=excluded.rev, updated_at=excluded.updated_at`,
       )
       .run({ ...card, tags: JSON.stringify(card.tags) });
   }
@@ -118,13 +122,13 @@ export class Board {
 interface RawCard {
   id: string; key: string; title: string; body: string; status: string;
   tags: string; assignee: string | null; progress: number;
-  external_id: string | null; rev: number; updated_at: number;
+  external_id: string | null; session_id: string | null; rev: number; updated_at: number;
 }
 
 function hydrate(r: RawCard): Card {
   return Card.parse({
     id: r.id, key: r.key, title: r.title, body: r.body, status: r.status,
     tags: JSON.parse(r.tags) as string[], assignee: r.assignee, progress: r.progress,
-    externalId: r.external_id, rev: r.rev, updatedAt: r.updated_at,
+    externalId: r.external_id, sessionId: r.session_id, rev: r.rev, updatedAt: r.updated_at,
   });
 }

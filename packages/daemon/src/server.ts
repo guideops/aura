@@ -372,6 +372,8 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
         throw err;
       }
       session = sessions.spawn(spawnInput);
+      // Bind the card to the claude session once it starts reporting from cwd.
+      boardProgress.expectSession(card.id, b.cwd);
     }
     return reply.send({ card: updated, session });
   });

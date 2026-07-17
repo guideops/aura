@@ -19,6 +19,8 @@ export const Card = z.object({
   assignee: z.string().nullable().default(null), // agentId, e.g. "blue-agent"
   progress: z.number().min(0).max(100).default(0), // steps-completed, not confidence
   externalId: z.string().nullable().default(null), // GitHub Projects item id
+  /** Provider session bound to this card (set when a spawned session starts). */
+  sessionId: z.string().nullable().default(null),
   /** Monotonic local version; bumped on every local mutation for conflict detection. */
   rev: z.number().int().nonnegative().default(0),
   updatedAt: z.number(),
