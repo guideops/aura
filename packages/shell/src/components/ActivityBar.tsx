@@ -3,15 +3,16 @@ import { Icons } from "../lib/icons";
 import { useShell } from "../lib/store";
 import type { CenterTab } from "./CenterArea";
 
-export type ActivityView = "explorer" | "search" | "scm" | "executions" | "connect";
+export type ActivityView = "explorer" | "scm" | "executions" | "connect";
 
 type RailItem =
   | { kind: "view"; id: ActivityView; label: string; icon: ReactElement }
-  | { kind: "tab"; tab: CenterTab; label: string; icon: ReactElement };
+  | { kind: "tab"; tab: CenterTab; label: string; icon: ReactElement }
+  | { kind: "palette"; label: string; icon: ReactElement };
 
 const ITEMS: RailItem[] = [
   { kind: "view", id: "explorer", label: "Explorer", icon: Icons.explore },
-  { kind: "view", id: "search", label: "Search", icon: Icons.search },
+  { kind: "palette", label: "Search", icon: Icons.search },
   { kind: "tab", tab: "kanban", label: "Board", icon: Icons.board },
   { kind: "view", id: "scm", label: "Source Control", icon: Icons.source },
   { kind: "view", id: "executions", label: "Executions", icon: Icons.executions },
@@ -23,37 +24,31 @@ export function ActivityBar({
   view,
   onSelect,
   onOpenTab,
+  onOpenPalette,
 }: {
   view: ActivityView;
   onSelect: (v: ActivityView) => void;
   onOpenTab: (t: CenterTab) => void;
+  onOpenPalette: () => void;
 }) {
   const connected = useShell((s) => s.connected);
   return (
     <nav className="activity-bar">
-      {ITEMS.map((it) =>
-        it.kind === "view" ? (
-          <button
-            key={it.id}
-            className={`activity-item ${view === it.id ? "active" : ""}`}
-            title={it.label}
-            onClick={() => onSelect(it.id)}
-          >
-            <span className="activity-icon">{it.icon}</span>
-            <span className="activity-label">{it.label}</span>
-          </button>
-        ) : (
-          <button
-            key={it.tab}
-            className="activity-item"
-            title={it.label}
-            onClick={() => onOpenTab(it.tab)}
-          >
-            <span className="activity-icon">{it.icon}</span>
-            <span className="activity-label">{it.label}</span>
-          </button>
-        ),
-      )}
+      {ITEMS.map((it) => (
+        <button
+          key={it.label}
+          className={`activity-item ${it.kind === "view" && view === it.id ? "active" : ""}`}
+          title={it.label}
+          onClick={() => {
+            if (it.kind === "view") onSelect(it.id);
+            else if (it.kind === "tab") onOpenTab(it.tab);
+            else onOpenPalette();
+          }}
+        >
+          <span className="activity-icon">{it.icon}</span>
+          <span className="activity-label">{it.label}</span>
+        </button>
+      ))}
       <div className="activity-spacer" />
       <div className="activity-me" title={connected ? "Online" : "Offline"}>
         <span className="me-avatar">◉‿◉</span>

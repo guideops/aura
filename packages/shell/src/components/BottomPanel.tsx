@@ -24,6 +24,15 @@ const LEVEL_BY_TYPE: Record<string, { label: string; cls: string }> = {
 
 export function BottomPanel() {
   const [tab, setTab] = useState<BottomTab>("terminal");
+  // Command palette / top bar can steer the drawer from outside.
+  useEffect(() => {
+    const onSet = (e: Event) => {
+      const t = (e as CustomEvent<string>).detail;
+      if (t === "terminal" || t === "output" || t === "eventlog" || t === "problems") setTab(t);
+    };
+    window.addEventListener("aura:bottom-tab", onSet);
+    return () => window.removeEventListener("aura:bottom-tab", onSet);
+  }, []);
   const events = useShell((s) => s.events);
   const approvals = useShell((s) => s.approvals);
   const problems = useMemo(

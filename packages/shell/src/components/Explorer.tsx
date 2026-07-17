@@ -3,7 +3,6 @@ import { api, type TreeNode } from "../lib/api";
 import { agentColor, useShell } from "../lib/store";
 import type { ActivityView } from "./ActivityBar";
 import type { CenterTab } from "./CenterArea";
-import { SearchPanel } from "./sidebar/SearchPanel";
 import { SourceControlPanel } from "./sidebar/SourceControlPanel";
 import { ExecutionsPanel } from "./sidebar/ExecutionsPanel";
 import { ConnectPanel } from "./sidebar/ConnectPanel";
@@ -11,15 +10,12 @@ import { ConnectPanel } from "./sidebar/ConnectPanel";
 export function Explorer({
   view,
   onOpenTab,
-  onSelectCard,
 }: {
   view: ActivityView;
   onOpenTab: (t: CenterTab) => void;
   onSelectCard: (id: string | null) => void;
 }) {
   switch (view) {
-    case "search":
-      return <SearchPanel onOpenTab={onOpenTab} onSelectCard={onSelectCard} />;
     case "scm":
       return <SourceControlPanel />;
     case "executions":
@@ -35,11 +31,32 @@ function ExplorerTree({ onOpenTab }: { onOpenTab: (t: CenterTab) => void }) {
   const agents = useShell((s) => s.agents);
   const events = useShell((s) => s.events);
   const [tree, setTree] = useState<TreeNode[]>([]);
+  const [root, setRoot] = useState<string>("");
+  const [rootInput, setRootInput] = useState<string>("");
+  const [editingRoot, setEditingRoot] = useState(false);
   const [open, setOpen] = useState<Record<string, boolean>>({ agents: true, workspace: true });
 
+  const load = (r?: string) => {
+    api
+      .workspaceTree(r)
+      .then((d) => {
+        setTree(d.tree);
+        setRoot(d.root);
+        setRootInput(d.root);
+      })
+      .catch(() => setTree([]));
+  };
+
   useEffect(() => {
-    api.workspaceTree().then(setTree).catch(() => setTree([]));
+    load();
+    const onRefresh = () => load(root || undefined);
+    window.addEventListener("aura:refresh-explorer", onRefresh);
+    return () => window.removeEventListener("aura:refresh-explorer", onRefresh);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const rootName = root.split(/[\\/]/).filter(Boolean).pop() ?? root;
+  const parent = root.replace(/[\\/][^\\/]+[\\/]?$/, "");
 
   const toggle = (k: string) => setOpen((o) => ({ ...o, [k]: !o[k] }));
 
@@ -47,11 +64,33 @@ function ExplorerTree({ onOpenTab }: { onOpenTab: (t: CenterTab) => void }) {
     <aside className="sidebar">
       <div className="panel-title">
         EXPLORER
-        <span className="panel-title-actions">⋯</span>
+        <span className="insp-actions">
+          <span className="clickable" title="Go up one directory" onClick={() => parent && load(parent)}>↑</span>
+          <span className="clickable" title="Open folder…" onClick={() => setEditingRoot((e) => !e)}>📂</span>
+          <span className="clickable" title="Refresh" onClick={() => load(root || undefined)}>↻</span>
+        </span>
       </div>
+      {editingRoot && (
+        <div className="sidebar-pad">
+          <input
+            className="w-full"
+            autoFocus
+            placeholder="absolute folder path…"
+            value={rootInput}
+            onChange={(e) => setRootInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && rootInput.trim()) {
+                load(rootInput.trim());
+                setEditingRoot(false);
+              }
+              if (e.key === "Escape") setEditingRoot(false);
+            }}
+          />
+        </div>
+      )}
       <div className="tree">
-        <div className="tree-section" onClick={() => toggle("workspace")}>
-          <span className="twist">{open.workspace ? "▾" : "▸"}</span> AURA-WORKSPACE
+        <div className="tree-section" onClick={() => toggle("workspace")} title={root}>
+          <span className="twist">{open.workspace ? "▾" : "▸"}</span> {rootName.toUpperCase() || "WORKSPACE"}
         </div>
         {open.workspace && (
           <>

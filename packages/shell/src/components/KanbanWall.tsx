@@ -31,6 +31,17 @@ export function KanbanWall({
   useEffect(() => {
     api.listCards().then(setCards).catch(() => {});
     api.githubStatus().then((s) => setRepo(s.linked ? "linked" : null)).catch(() => {});
+    const w = window as unknown as Record<string, unknown>;
+    if (w.__auraNewCard) {
+      w.__auraNewCard = false;
+      setShowNew(true);
+    }
+    const onNew = () => {
+      w.__auraNewCard = false;
+      setShowNew(true);
+    };
+    window.addEventListener("aura:new-card", onNew);
+    return () => window.removeEventListener("aura:new-card", onNew);
   }, []);
 
   const visible = useMemo(() => {

@@ -268,8 +268,27 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
   app.get("/api/health", async () => ({ ok: true, version: SERVER_VERSION }));
 
   // ---- Workspace explorer (shell UI): file tree + git badges ----
-  app.get("/api/workspace/tree", async () => ({ tree: await workspaceTree(process.cwd()) }));
-  app.get("/api/workspace/git", async () => (await workspaceGitBranch(process.cwd())) ?? { branch: null, dirty: false });
+  // Optional ?root= lets the operator browse outside the daemon cwd
+  // (localhost trust model, same as vault dir selection).
+  const resolveRoot = (raw: unknown): string | null => {
+    if (typeof raw !== "string" || !raw.trim()) return process.cwd();
+    const p = path.resolve(raw.trim());
+    try {
+      return fs.statSync(p).isDirectory() ? p : null;
+    } catch {
+      return null;
+    }
+  };
+  app.get("/api/workspace/tree", async (req, reply) => {
+    const root = resolveRoot((req.query as { root?: string }).root);
+    if (!root) return reply.code(400).send({ error: "not a directory" });
+    return { root, tree: await workspaceTree(root) };
+  });
+  app.get("/api/workspace/git", async (req, reply) => {
+    const root = resolveRoot((req.query as { root?: string }).root);
+    if (!root) return reply.code(400).send({ error: "not a directory" });
+    return (await workspaceGitBranch(root)) ?? { branch: null, dirty: false, changes: [] };
+  });
 
   // Vault (Obsidian-compatible markdown memory).
   app.get("/api/vault/notes", async () => ({ notes: vault.list() }));

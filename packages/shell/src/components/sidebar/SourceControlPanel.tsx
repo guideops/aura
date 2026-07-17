@@ -46,14 +46,16 @@ export function SourceControlPanel() {
       ))}
       <div className="tree-section">GITHUB PROJECTS</div>
       <div className="sidebar-pad">
-        <div className="muted small-line">
-          {gh?.linked
-            ? `Linked · last sync ${gh.lastSync ? new Date(gh.lastSync).toLocaleTimeString() : "never"}`
-            : "Not linked. Link via desktop Settings (token stays in OS keychain)."}
-        </div>
-        {gh?.linked && gh.reviewQueue.length > 0 && (
-          <div className="muted small-line">⚠ {gh.reviewQueue.length} conflict(s) in review queue</div>
-        )}
+        <dl className="task-ctx">
+          <dt>Linked</dt>
+          <dd className={gh?.linked ? "svc-ok" : "muted"}>{gh?.linked ? "● Yes" : "○ No"}</dd>
+          <dt>Last sync</dt>
+          <dd>{gh?.lastSync ? new Date(gh.lastSync).toLocaleTimeString() : "never"}</dd>
+          <dt>Auto-sync</dt>
+          <dd>{gh?.intervalMs ? `every ${Math.round(gh.intervalMs / 1000)}s` : "off"}</dd>
+          <dt>Review queue</dt>
+          <dd>{gh?.reviewQueue.length ? `⚠ ${gh.reviewQueue.length} conflict(s)` : "empty"}</dd>
+        </dl>
         <div className="row-gap">
           <button
             className="btn-secondary"
@@ -79,7 +81,71 @@ export function SourceControlPanel() {
             </button>
           )}
         </div>
+        {!gh?.linked && <GithubLinkForm onLinked={refresh} />}
       </div>
     </aside>
+  );
+}
+
+/**
+ * Inline connect flow. The preferred path is the desktop Settings dialog
+ * (token encrypted in the OS keychain); this form talks straight to the
+ * local daemon, which keeps the token server-side and never echoes it back.
+ */
+function GithubLinkForm({ onLinked }: { onLinked: () => void }) {
+  const [showForm, setShowForm] = useState(false);
+  const [token, setToken] = useState("");
+  const [projectId, setProjectId] = useState("");
+  const [msg, setMsg] = useState("");
+
+  if (!showForm) {
+    return (
+      <div className="row-gap">
+        <button className="btn-primary" onClick={() => setShowForm(true)}>Connect GitHub…</button>
+      </div>
+    );
+  }
+  return (
+    <div className="spawn-form" style={{ marginTop: 8 }}>
+      <div className="muted small-line">
+        Needs a fine-grained PAT with Projects read/write and the Projects v2 node id
+        (<code>PVT_…</code>). Token is stored by the local daemon only. The desktop
+        Settings dialog is the preferred path — it encrypts the token in the OS keychain.
+      </div>
+      <input
+        type="password"
+        placeholder="GitHub token (PAT)"
+        value={token}
+        onChange={(e) => setToken(e.target.value)}
+      />
+      <input
+        placeholder="Project node id (PVT_…)"
+        value={projectId}
+        onChange={(e) => setProjectId(e.target.value)}
+      />
+      <div className="row-gap">
+        <button
+          className="btn-primary"
+          disabled={!token.trim() || !projectId.trim()}
+          onClick={async () => {
+            setMsg("linking…");
+            const res = await api.githubLink({ token: token.trim(), projectId: projectId.trim() });
+            if (res.ok) {
+              setMsg("linked ✓");
+              setToken("");
+              setShowForm(false);
+              onLinked();
+            } else {
+              const body = (await res.json().catch(() => ({}))) as { error?: string };
+              setMsg(`failed: ${body.error ?? res.status}`);
+            }
+          }}
+        >
+          Link
+        </button>
+        <button className="btn-secondary" onClick={() => { setShowForm(false); setToken(""); }}>Cancel</button>
+        <span className="muted small-line">{msg}</span>
+      </div>
+    </div>
   );
 }

@@ -40,8 +40,9 @@ export const api = {
       body: JSON.stringify({ approved }),
     });
   },
-  async workspaceTree(): Promise<TreeNode[]> {
-    return (await json<{ tree: TreeNode[] }>(await fetch("/api/workspace/tree"))).tree;
+  async workspaceTree(root?: string): Promise<{ tree: TreeNode[]; root: string }> {
+    const url = root ? `/api/workspace/tree?root=${encodeURIComponent(root)}` : "/api/workspace/tree";
+    return json(await fetch(url));
   },
   async status(): Promise<DaemonStatus> {
     return json(await fetch("/api/status"));
@@ -94,14 +95,28 @@ export const api = {
       body: JSON.stringify({ dir }),
     });
   },
-  async vaultSearch(q: string): Promise<{ name: string; path: string; snippet?: string }[]> {
+  async vaultSearch(q: string): Promise<{ slug: string; title: string; snippet?: string }[]> {
     const r = await fetch(`/api/vault/search?q=${encodeURIComponent(q)}`);
     if (!r.ok) return [];
-    const d = (await r.json()) as { results?: { name: string; path: string; snippet?: string }[]; notes?: { name: string; path: string }[] };
-    return d.results ?? d.notes ?? [];
+    const d = (await r.json()) as { hits?: { slug: string; title: string; snippet?: string }[] };
+    return d.hits ?? [];
   },
   async hermesStatus(): Promise<{ enabled: boolean }> {
     return json(await fetch("/api/hermes/status"));
+  },
+  async brief(sinceHours = 24): Promise<{ ok: boolean; slug: string }> {
+    return json(await fetch("/api/vault/brief", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sinceHours }),
+    }));
+  },
+  async githubLink(input: { token: string; projectId: string; intervalMs?: number }): Promise<Response> {
+    return fetch("/api/github/link", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
   },
 };
 

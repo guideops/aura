@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { TopBar } from "./components/TopBar";
 import { ActivityBar, type ActivityView } from "./components/ActivityBar";
@@ -8,6 +8,7 @@ import { RightRail } from "./components/RightRail";
 import { BottomPanel } from "./components/BottomPanel";
 import { StatusBar } from "./components/StatusBar";
 import { ActionRequestModal } from "./components/ActionRequestModal";
+import { CommandPalette } from "./components/CommandPalette";
 import { startWs } from "./lib/store";
 import type { ZoneContext } from "./lib/zones";
 
@@ -16,6 +17,7 @@ export function App() {
   const [tab, setTab] = useState<CenterTab>("office");
   const [selectedCard, setSelectedCard] = useState<string | null>(null);
   const [zone, setZone] = useState<ZoneContext | null>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   useEffect(() => startWs(), []);
 
@@ -31,11 +33,40 @@ export function App() {
     return () => window.removeEventListener("message", onMessage);
   }, []);
 
+  // Ctrl/Cmd+K opens the command palette anywhere.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const setBottomTab = useCallback((t: string) => {
+    window.dispatchEvent(new CustomEvent("aura:bottom-tab", { detail: t }));
+  }, []);
+
+  const newCard = useCallback(() => {
+    setTab("kanban");
+    // Flag survives the mount race when switching from another tab;
+    // the event covers the already-mounted case.
+    (window as unknown as Record<string, unknown>).__auraNewCard = true;
+    window.dispatchEvent(new CustomEvent("aura:new-card"));
+  }, []);
+
   return (
     <div className="shell">
-      <TopBar />
+      <TopBar
+        onOpenPalette={() => setPaletteOpen(true)}
+        onNewCard={newCard}
+        onConnect={() => setView("connect")}
+        onProblems={() => setBottomTab("problems")}
+      />
       <div className="shell-main">
-        <ActivityBar view={view} onSelect={setView} onOpenTab={setTab} />
+        <ActivityBar view={view} onSelect={setView} onOpenTab={setTab} onOpenPalette={() => setPaletteOpen(true)} />
         <PanelGroup direction="horizontal" className="shell-panels">
           <Panel defaultSize={16} minSize={10} collapsible>
             <Explorer view={view} onOpenTab={setTab} onSelectCard={setSelectedCard} />
@@ -72,6 +103,16 @@ export function App() {
       </div>
       <StatusBar />
       <ActionRequestModal />
+      <CommandPalette
+        open={paletteOpen}
+        ctx={{
+          setTab,
+          setView,
+          setBottomTab,
+          selectCard: setSelectedCard,
+          close: () => setPaletteOpen(false),
+        }}
+      />
     </div>
   );
 }
