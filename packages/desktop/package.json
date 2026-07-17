@@ -25,6 +25,7 @@
   },
   "build": {
     "appId": "dev.aura.desktop",
+    "npmRebuild": false,
     "productName": "AURA",
     "directories": { "output": "dist-app" },
     "files": ["dist/**", "static/**", "package.json"],
