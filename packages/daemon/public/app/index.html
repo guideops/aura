@@ -34,6 +34,10 @@
       <svg viewBox="0 0 24 24"><path d="M4 8l8-4 8 4-8 4-8-4Zm0 4 8 4 8-4M4 16l8 4 8-4"/></svg>
       <span>Space CAD</span>
     </button>
+    <button class="rail-btn" data-view="connections" title="Connections">
+      <svg viewBox="0 0 24 24"><path d="M9 7H6a4 4 0 0 0 0 8h3M15 7h3a4 4 0 0 1 0 8h-3M8 11h8"/></svg>
+      <span>Connect</span>
+    </button>
     <div class="rail-spacer"></div>
     <div id="rail-avatar" title="AURA daemon">
       <div class="avatar-bot">◉‿◉</div>
@@ -113,6 +117,67 @@
           <div id="spawn-hint" class="sub"></div>
         </div>
         <div id="sessions-list" class="cardlist"></div>
+      </section>
+      <section id="view-connections" class="view pane">
+        <h2>Connections</h2>
+        <div class="conn-grid">
+          <div class="conn-card" id="conn-aw">
+            <div class="conn-head">
+              <span class="conn-name">Agentic Workspace</span>
+              <span class="conn-state" id="aw-state">Not linked</span>
+            </div>
+            <div class="conn-body">
+              <div id="aw-peers"></div>
+              <div id="aw-code-wrap" hidden>
+                <div class="pair-code" id="aw-code"></div>
+                <div class="sub">Enter this code in Agentic Workspace → Connect AURA. Expires in <span id="aw-ttl"></span>s.</div>
+              </div>
+              <div class="row-btns">
+                <button id="aw-pair" class="btn primary">Generate pairing code</button>
+              </div>
+            </div>
+          </div>
+          <div class="conn-card" id="conn-vault">
+            <div class="conn-head">
+              <span class="conn-name">Obsidian Vault</span>
+              <span class="conn-state on" id="vault-state">Connected</span>
+            </div>
+            <div class="conn-body">
+              <div class="sub">Folder</div>
+              <code id="vault-dir" class="conn-path">—</code>
+              <div class="row-btns">
+                <input id="vault-dir-input" placeholder="new folder path…" />
+                <button id="vault-dir-set" class="btn">Change</button>
+              </div>
+              <div class="row-btns" id="vault-adopt-wrap" hidden>
+                <button id="vault-adopt" class="btn primary"></button>
+              </div>
+            </div>
+          </div>
+          <div class="conn-card" id="conn-github">
+            <div class="conn-head">
+              <span class="conn-name">GitHub Projects</span>
+              <span class="conn-state" id="gh-state">Not linked</span>
+            </div>
+            <div class="conn-body">
+              <div class="sub" id="gh-detail">Link via desktop Settings (token stays in OS keychain).</div>
+              <div class="row-btns">
+                <button id="gh-sync2" class="btn">Sync now</button>
+                <button id="gh-unlink" class="btn">Unlink</button>
+              </div>
+            </div>
+          </div>
+          <div class="conn-card" id="conn-hermes">
+            <div class="conn-head">
+              <span class="conn-name">Hermes API (fallback)</span>
+              <span class="conn-state" id="hermes-state">Off</span>
+            </div>
+            <div class="conn-body">
+              <div class="sub">Direct one-off runs. Orchestration belongs to Agentic Workspace.
+                Enable with <code>AURA_HERMES_KEY</code>.</div>
+            </div>
+          </div>
+        </div>
       </section>
       <section id="view-source" class="view pane">
         <h2>Source Control — GitHub Projects Sync</h2>

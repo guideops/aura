@@ -19,7 +19,7 @@ function toast(msg) {
 }
 
 // ---------- views ----------
-const VIEWS = ["office", "board", "cad", "sessions", "source", "skills", "note"];
+const VIEWS = ["office", "board", "cad", "sessions", "source", "skills", "note", "connections"];
 function showView(name) {
   for (const v of VIEWS) {
     const node = $(`#view-${v}`);
@@ -33,6 +33,7 @@ function showView(name) {
   }
   if (name === "sessions") loadSessions();
   if (name === "source") loadGithub();
+  if (name === "connections") loadConnections();
 }
 for (const b of document.querySelectorAll(".rail-btn[data-view]")) {
   b.onclick = () => showView(b.dataset.view);
@@ -303,6 +304,101 @@ $("#gh-sync").onclick = async () => {
   loadGithub();
 };
 
+// ---------- connections panel ----------
+let pairTicker = null;
+async function loadConnections() {
+  // Agentic Workspace peers
+  const pair = await fetch("/api/pair/status").then((r) => r.json()).catch(() => ({ peers: [] }));
+  const peersHost = $("#aw-peers");
+  peersHost.innerHTML = "";
+  const fresh = (p) => Date.now() - p.lastSeenAt < 120_000;
+  for (const p of pair.peers) {
+    const row = el("div", "peer-row");
+    const left = el("div");
+    left.appendChild(el("div", "", p.name));
+    left.appendChild(el("div", "sub", `${fresh(p) ? "live" : "stale"} · last seen ${ts(p.lastSeenAt)}${p.vaultPath ? " · vault shared" : ""}`));
+    row.appendChild(left);
+    const btn = el("button", "btn", "Disconnect");
+    btn.onclick = async () => {
+      await fetch("/api/pair/revoke", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ peerId: p.id }),
+      });
+      loadConnections();
+    };
+    row.appendChild(btn);
+    peersHost.appendChild(row);
+  }
+  const state = $("#aw-state");
+  const anyFresh = pair.peers.some(fresh);
+  state.textContent = pair.peers.length ? (anyFresh ? "Connected" : "Linked (stale)") : "Not linked";
+  state.classList.toggle("on", anyFresh);
+
+  // Vault card
+  const { dir } = await fetch("/api/vault/dir").then((r) => r.json());
+  $("#vault-dir").textContent = dir;
+  const donor = pair.peers.find((p) => p.vaultPath && p.vaultPath !== dir);
+  $("#vault-adopt-wrap").hidden = !donor;
+  if (donor) $("#vault-adopt").textContent = `Adopt ${donor.name}'s vault — ${donor.vaultPath}`;
+  $("#vault-adopt").onclick = donor ? async () => {
+    const res = await fetch("/api/vault/dir", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dir: donor.vaultPath }),
+    });
+    toast(res.ok ? `vault adopted — ${(await res.json()).noteCount} notes` : `failed: ${(await res.json()).error}`);
+    refreshExplorer();
+    loadConnections();
+  } : null;
+
+  // GitHub card
+  const gh = await fetch("/api/github/status").then((r) => r.json());
+  $("#gh-state").textContent = gh.linked ? "Connected" : "Not linked";
+  $("#gh-state").classList.toggle("on", gh.linked);
+  $("#gh-detail").textContent = gh.linked
+    ? (gh.lastSync ? `Last sync ${ts(gh.lastSync.at)} · ${gh.lastSync.applied} applied · ${gh.lastSync.conflicts} conflicts` : "Linked — not synced yet")
+    : "Link via desktop Settings (token stays in OS keychain).";
+
+  // Hermes card
+  const hs = await fetch("/api/hermes/status").then((r) => r.json());
+  $("#hermes-state").textContent = hs.enabled ? "Enabled" : "Off";
+  $("#hermes-state").classList.toggle("on", hs.enabled);
+}
+
+$("#aw-pair").onclick = async () => {
+  const { code, expiresAt } = await fetch("/api/pair/start", { method: "POST" }).then((r) => r.json());
+  $("#aw-code-wrap").hidden = false;
+  $("#aw-code").textContent = code;
+  if (pairTicker) clearInterval(pairTicker);
+  pairTicker = setInterval(() => {
+    const left = Math.max(0, Math.round((expiresAt - Date.now()) / 1000));
+    $("#aw-ttl").textContent = String(left);
+    if (left === 0) {
+      clearInterval(pairTicker);
+      pairTicker = null;
+      $("#aw-code-wrap").hidden = true;
+    }
+  }, 500);
+};
+$("#vault-dir-set").onclick = async () => {
+  const dir = $("#vault-dir-input").value.trim();
+  if (!dir) return toast("enter a folder path");
+  const res = await fetch("/api/vault/dir", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dir }),
+  });
+  if (!res.ok) return toast(`failed: ${(await res.json()).error}`);
+  toast(`vault switched — ${(await res.json()).noteCount} notes`);
+  $("#vault-dir-input").value = "";
+  refreshExplorer();
+  loadConnections();
+};
+$("#gh-sync2").onclick = () => $("#gh-sync").click();
+$("#gh-unlink").onclick = async () => {
+  await fetch("/api/github/unlink", { method: "POST" });
+  toast("GitHub unlinked");
+  loadConnections();
+};
+
 // ---------- usage / status panels ----------
 async function loadUsage() {
   const { models, total } = await fetch("/api/usage").then((r) => r.json());
@@ -348,6 +444,8 @@ async function loadStatus() {
     ["Obsidian Vault", st.services.vault.ok, `${st.services.vault.notes} notes`],
     ["Board", st.services.board.ok, `${st.services.board.cards} cards`],
     ["GitHub Sync", st.services.github.linked, st.services.github.linked ? "Linked" : "Not linked"],
+    ["Agentic Workspace", st.services.workspace?.ok ?? false,
+      st.services.workspace?.peers ? `${st.services.workspace.peers} peer(s)` : "Not linked"],
     ["Sessions", st.services.sessions.ok, `${st.services.sessions.running} running`],
   ];
   for (const [name, ok, label] of smap) {
@@ -493,6 +591,7 @@ const ACTIONS = [
   { label: "Go to Board", run: () => showView("board") },
   { label: "Go to Executions", run: () => showView("sessions") },
   { label: "Open Space CAD (edit office layout)", run: () => showView("cad") },
+  { label: "Open Connections (pair apps, vault)", run: () => showView("connections") },
   { label: "Show terminal", run: () => selectDockTab("terminal") },
   { label: "Go to Source Control", run: () => showView("source") },
   { label: "Brief now (write agenda note)", run: () => briefNow() },
@@ -600,6 +699,10 @@ function connect() {
       loadSessionsTree();
       if (!$("#dock-terminal").hidden) refreshTerminalSessions();
       if ($("#view-sessions").classList.contains("active")) loadSessions();
+    } else if (msg.kind === "peer.updated") {
+      if ($("#view-connections").classList.contains("active")) loadConnections();
+      toast("workspace connection updated");
+      scheduleStatus();
     } else if (msg.kind === "space.updated") {
       toast("office layout saved");
       loadOutline().catch(() => {});

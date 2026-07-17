@@ -16,6 +16,8 @@ import { SpaceStore } from "./space-store.js";
 import { SpaceFile } from "@aura/core";
 import { HermesSessionManager } from "./hermes-sessions.js";
 import { HermesClient } from "@aura/adapter-hermes";
+import { PairingManager } from "./pairing.js";
+import fs from "node:fs";
 import { Vault } from "./vault.js";
 import { writeBrief } from "./brief.js";
 import { Board } from "./board.js";
@@ -41,6 +43,10 @@ export interface DaemonOptions {
   sessionManagerOptions?: Pick<SessionManagerOptions, "command" | "rawArgs">;
   /** Test seam: injected Hermes client; defaults from AURA_HERMES_URL/KEY env. */
   hermesClient?: HermesClient | null;
+  /** Paired-peer credential store; defaults to <cwd>/aura.peers.json. */
+  peersFile?: string;
+  /** Operator config (chosen vault dir, ...); defaults to <cwd>/aura.config.json. */
+  configFile?: string;
 }
 
 export interface Daemon {
@@ -65,8 +71,17 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
   const vaultDbPath = options.dbPath && options.dbPath !== ":memory:"
     ? options.dbPath.replace(/\.db$/, "") + ".vault.db"
     : ":memory:";
-  const vault = new Vault(
-    options.vaultDir ?? path.join(process.cwd(), "vault"),
+  // Vault dir: explicit option (tests/env) > operator config file > default.
+  const configFile = options.configFile ?? path.join(process.cwd(), "aura.config.json");
+  const readConfig = (): { vaultDir?: string } => {
+    try { return JSON.parse(fs.readFileSync(configFile, "utf8")); } catch { return {}; }
+  };
+  const writeConfig = (patch: Record<string, unknown>) => {
+    fs.mkdirSync(path.dirname(configFile), { recursive: true });
+    fs.writeFileSync(configFile, JSON.stringify({ ...readConfig(), ...patch }, null, 2));
+  };
+  let vault = new Vault(
+    options.vaultDir ?? readConfig().vaultDir ?? path.join(process.cwd(), "vault"),
     vaultDbPath,
   );
   vault.reindex();
@@ -86,7 +101,18 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
   };
 
   // External vault edits (Obsidian, editors) → reindex → live UI refresh.
-  vault.watch((noteCount) => broadcast({ kind: "vault.updated", noteCount }));
+  const wireVault = (v: Vault) => v.watch((noteCount) => broadcast({ kind: "vault.updated", noteCount }));
+  wireVault(vault);
+  /** Hot-swap the vault folder (Connections panel / adopt-from-peer). */
+  const swapVault = (dir: string): number => {
+    vault.close();
+    vault = new Vault(dir, vaultDbPath);
+    const count = vault.reindex();
+    wireVault(vault);
+    writeConfig({ vaultDir: dir });
+    broadcast({ kind: "vault.updated", noteCount: count });
+    return count;
+  };
 
   // Agent activity animates assigned cards (progress bar, session.end → review).
   const boardProgress = new BoardProgress(board, (card) =>
@@ -521,6 +547,79 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     return reply.send({ ok: true, remaining: reviewQueue.length });
   });
 
+  // ---- App pairing (Agentic Workspace & friends) ----
+  const pairing = new PairingManager(options.peersFile ?? path.join(process.cwd(), "aura.peers.json"));
+  const broadcastPeers = () => broadcast({ kind: "peer.updated", peers: pairing.list() });
+  const bearerPeer = (req: { headers: Record<string, unknown> }) => {
+    const auth = String(req.headers["authorization"] ?? "");
+    return pairing.verify(auth.startsWith("Bearer ") ? auth.slice(7) : undefined);
+  };
+
+  // Local UI mints a code; peer's backend redeems it once for a token.
+  app.post("/api/pair/start", async () => pairing.startPairing());
+  app.post("/api/pair/claim", async (req, reply) => {
+    const { code, name } = (req.body ?? {}) as { code?: string; name?: string };
+    if (!code) return reply.code(400).send({ error: "code required" });
+    const claimed = pairing.claim(code, name ?? "peer");
+    if (!claimed) return reply.code(403).send({ error: "invalid or expired code" });
+    broadcastPeers();
+    return reply.send(claimed);
+  });
+  app.get("/api/pair/status", async () => ({
+    peers: pairing.list(),
+    pending: pairing.pendingCode !== null,
+  }));
+  app.post("/api/pair/revoke", async (req, reply) => {
+    const { peerId } = (req.body ?? {}) as { peerId?: string };
+    if (!peerId || !pairing.revoke(peerId)) return reply.code(404).send({ error: "unknown peer" });
+    broadcastPeers();
+    return reply.send({ ok: true });
+  });
+
+  // Authenticated peer surface: bulk event ingest + liveness/info heartbeat.
+  app.post("/api/peer/events", async (req, reply) => {
+    const peer = bearerPeer(req);
+    if (!peer) return reply.code(401).send({ error: "pairing token required" });
+    const { events } = (req.body ?? {}) as { events?: unknown[] };
+    if (!Array.isArray(events) || events.length === 0 || events.length > 500) {
+      return reply.code(400).send({ error: "events: 1..500 required" });
+    }
+    let accepted = 0;
+    for (const raw of events) {
+      const parsed = AgentEvent.omit({ id: true, ts: true })
+        .extend({ id: AgentEvent.shape.id.optional(), ts: AgentEvent.shape.ts.optional() })
+        .safeParse(raw);
+      if (!parsed.success) continue;
+      const { id, ts, ...rest } = parsed.data;
+      bus.emit({ ...rest, id: id ?? ulid(), ts: ts ?? Date.now() });
+      accepted++;
+    }
+    return reply.send({ ok: true, accepted, rejected: events.length - accepted });
+  });
+  app.post("/api/peer/heartbeat", async (req, reply) => {
+    const peer = bearerPeer(req);
+    if (!peer) return reply.code(401).send({ error: "pairing token required" });
+    const { name, vaultPath } = (req.body ?? {}) as { name?: string; vaultPath?: string };
+    const hb: { name?: string; vaultPath?: string } = {};
+    if (name !== undefined) hb.name = name;
+    if (vaultPath !== undefined) hb.vaultPath = vaultPath;
+    const info = pairing.heartbeat(peer.id, hb);
+    broadcastPeers();
+    return reply.send({ ok: true, peer: info });
+  });
+
+  // Vault folder management (Connections panel; "adopt peer's vault").
+  app.get("/api/vault/dir", async () => ({ dir: vault.rootDir }));
+  app.post("/api/vault/dir", async (req, reply) => {
+    const { dir } = (req.body ?? {}) as { dir?: string };
+    if (!dir) return reply.code(400).send({ error: "dir required" });
+    if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+      return reply.code(400).send({ error: `not a directory: ${dir}` });
+    }
+    const noteCount = swapVault(dir);
+    return reply.send({ ok: true, dir, noteCount });
+  });
+
   // ---- Space CAD (office layout) ----
   const space = new SpaceStore(options.spaceFile ?? path.join(process.cwd(), "office.space.json"));
   app.get("/api/space", async () => space.load());
@@ -609,6 +708,12 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
         board: { ok: true, cards: cards.length },
         github: { ok: syncEngine !== null, linked: syncEngine !== null, lastSync },
         sessions: { ok: true, running: sessions.list().filter((s) => s.status === "running").length },
+        workspace: (() => {
+          const peers = pairing.list();
+          const fresh = peers.some((p) => Date.now() - p.lastSeenAt < 120_000);
+          return { ok: peers.length > 0 && fresh, peers: peers.length };
+        })(),
+        hermes: { ok: hermes.enabled, enabled: hermes.enabled },
       },
       git: { branch: await gitBranch() },
       problems: guardrails.pendingRequests.length + reviewQueue.length,
@@ -617,7 +722,7 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
 
   app.addHook("onClose", async () => { stopSyncTimer(); vault.close(); board.close(); syncEngine?.close(); });
 
-  return { app, bus, store, log, guardrails, vault, board, skills, hookSessions };
+  return { app, bus, store, log, guardrails, get vault() { return vault; }, board, skills, hookSessions };
 }
 
 export function defaultPublicDir(): string {

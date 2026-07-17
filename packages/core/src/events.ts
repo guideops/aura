@@ -111,5 +111,16 @@ export const ServerMessage = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("session.status"), sessionId: z.string(), status: z.string() }),
   /** Office layout changed via Space CAD; viewers should reload it. */
   z.object({ kind: z.literal("space.updated") }),
+  /** Paired-app roster changed (claim/revoke/heartbeat) or vault dir swapped. */
+  z.object({
+    kind: z.literal("peer.updated"),
+    peers: z.array(z.object({
+      id: z.string(),
+      name: z.string(),
+      pairedAt: z.number(),
+      lastSeenAt: z.number(),
+      vaultPath: z.string().optional(),
+    })),
+  }),
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;
