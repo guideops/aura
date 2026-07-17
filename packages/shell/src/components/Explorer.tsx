@@ -7,6 +7,12 @@ import { SourceControlPanel } from "./sidebar/SourceControlPanel";
 import { ExecutionsPanel } from "./sidebar/ExecutionsPanel";
 import { ConnectPanel } from "./sidebar/ConnectPanel";
 
+// Agent badge = first letter of live status (A active, I idle, O offline, …).
+// Distinct from file git badges (M/U/A/D) elsewhere in the tree.
+function statusInitial(status: string): string {
+  return (status[0] ?? "?").toUpperCase();
+}
+
 export function Explorer({
   view,
   onOpenTab,
@@ -102,8 +108,8 @@ function ExplorerTree({ onOpenTab }: { onOpenTab: (t: CenterTab) => void }) {
                 <div key={a.agentId} className="tree-item indent-2" title={a.status}>
                   <i className="avatar-dot" style={{ background: agentColor(a.agentId) }} />
                   <span className="tree-name">{a.agentId}</span>
-                  <span className={`git-badge status-${a.status}`}>
-                    {a.status === "offline" ? "U" : "M"}
+                  <span className={`git-badge status-${a.status}`} title={a.status}>
+                    {statusInitial(a.status)}
                   </span>
                 </div>
               ))}
