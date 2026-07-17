@@ -349,6 +349,12 @@ function ensureAgent(a) {
     // tag sits above the head in the group's LOCAL (pre-scale) space.
     tag.position.y = (group.userData.localTop ?? 1.4) * 1.05 + 0.15;
     group.add(tag);
+    // card badge below the name tag; text swapped when board state changes
+    const cardTag = makeLabel("", 1.9);
+    cardTag.position.y = tag.position.y - 0.35;
+    cardTag.visible = false;
+    group.add(cardTag);
+    group.userData.cardTag = cardTag;
     group.userData.agentId = a.agentId;
     scene.add(group);
     entry = { group, mixer, actions, mode: "idle", target: new THREE.Vector3(0,0,0), data: a };
@@ -369,6 +375,33 @@ function setMode(entry, mode) {
   entry.mode = mode;
 }
 
+// ---------- board cards on desks ----------
+const cardsByAgent = new Map(); // agentId → card (in_progress only)
+function applyCard(card) {
+  // Drop stale ownership of this card first.
+  for (const [aid, c] of cardsByAgent) if (c.id === card.id) cardsByAgent.delete(aid);
+  const owner = card.assignee;
+  if (owner && card.status === "in_progress") cardsByAgent.set(owner, card);
+  refreshCardTags();
+}
+function refreshCardTags() {
+  for (const [agentId, entry] of agents) {
+    const tag = entry.group.userData.cardTag;
+    if (!tag) continue;
+    const card = cardsByAgent.get(agentId);
+    const text = card ? `${card.key} · ${card.progress}%` : "";
+    if (tag.userData.text === text) continue;
+    tag.userData.text = text;
+    tag.visible = text !== "";
+    if (text) {
+      const fresh = makeLabel(text, 1.9);
+      tag.material.map?.dispose();
+      tag.material.map = fresh.material.map;
+      tag.material.needsUpdate = true;
+    }
+  }
+}
+
 // ---------- picking / panel ----------
 const ray = new THREE.Raycaster();
 const panel = document.getElementById("panel");
@@ -381,10 +414,12 @@ addEventListener("pointerdown", (e) => {
   if (id && agents.has(id)) {
     const a = agents.get(id).data;
     const tok = (a.tokens.input + a.tokens.output).toLocaleString();
+    const card = cardsByAgent.get(a.agentId);
     panel.style.display = "block";
     panel.innerHTML = `<h3>${a.agentId}</h3>
       <div class="row"><span>STATUS</span><span>${a.status}</span></div>
       <div class="row"><span>TASK</span><span>${a.task || "—"}</span></div>
+      <div class="row"><span>CARD</span><span>${card ? `${card.key} · ${card.progress}%` : "—"}</span></div>
       <div class="row"><span>TOKENS</span><span>${tok}</span></div>
       <div class="row"><span>SESSION</span><span>${a.sessionId.slice(0,8)}</span></div>`;
   } else panel.style.display = "none";
@@ -429,7 +464,14 @@ function connect() {
       msg.agents.forEach(ensureAgent);
       (msg.approvals || []).forEach((r) => approvals.set(r.id, r));
       renderApprovals();
-    } else if (msg.kind === "snapshot") ensureAgent(msg.agent);
+      fetch("/api/board/cards").then((r) => r.json())
+        .then((d) => d.cards.forEach(applyCard)).catch(() => {});
+    } else if (msg.kind === "snapshot") { ensureAgent(msg.agent); refreshCardTags(); }
+    else if (msg.kind === "card.upsert") applyCard(msg.card);
+    else if (msg.kind === "card.removed") {
+      for (const [aid, c] of cardsByAgent) if (c.id === msg.id) cardsByAgent.delete(aid);
+      refreshCardTags();
+    }
     else if (msg.kind === "approval.pending") { approvals.set(msg.request.id, msg.request); renderApprovals(); }
     else if (msg.kind === "approval.resolved") { approvals.delete(msg.id); renderApprovals(); }
     countEl.textContent = `${agents.size} agents`;
