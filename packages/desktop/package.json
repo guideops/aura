@@ -9,7 +9,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "electron .",
     "bundle:daemon": "node scripts/bundle-daemon.mjs",
-    "dist": "node scripts/bundle-daemon.mjs && electron-builder --win --dir",
+    "gen:icons": "node scripts/gen-icon.mjs",
+    "dist": "node scripts/gen-icon.mjs && node scripts/bundle-daemon.mjs && electron-builder --win --dir",
+    "dist:installer": "node scripts/gen-icon.mjs && node scripts/bundle-daemon.mjs && electron-builder --win nsis",
     "test": "vitest run"
   },
   "dependencies": {
@@ -29,7 +31,20 @@
     "productName": "AURA",
     "directories": { "output": "dist-app" },
     "files": ["dist/**", "static/**", "package.json"],
-    "extraResources": [{ "from": "resources/daemon", "to": "daemon" }],
-    "win": { "target": ["dir"], "signAndEditExecutable": false }
+    "extraResources": [
+      { "from": "resources/daemon", "to": "daemon" },
+      { "from": "resources/icons", "to": "icons" }
+    ],
+    "win": {
+      "target": ["dir"],
+      "icon": "resources/icons/icon.png",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "AURA-Setup-${version}.${ext}"
+    }
   }
 }

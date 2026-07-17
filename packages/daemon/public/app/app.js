@@ -724,6 +724,9 @@ function scheduleStatus() {
 
 // ---------- boot ----------
 async function boot() {
+  // Deep link: ?view=board|connections|office|... (tray menu, external links)
+  const wanted = new URLSearchParams(location.search).get("view");
+  if (wanted && VIEWS.includes(wanted)) showView(wanted);
   try {
     const { events } = await fetch("/api/events/recent").then((r) => r.json());
     for (const ev of events.slice(-120)) pushEvent(ev);

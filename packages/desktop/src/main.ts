@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, ipcMain, Menu, safeStorage } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, safeStorage, Tray } from "electron";
 import { TokenStore } from "./token-store.js";
 
 const PORT = Number(process.env["AURA_PORT"] ?? 8311);
@@ -12,6 +12,15 @@ const BASE = `http://${HOST}:${PORT}`;
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let store: TokenStore;
+let tray: Tray | null = null;
+let quitting = false;
+
+/** Icons live in resources/icons (dev) or process.resourcesPath/icons (packaged). */
+function iconPath(name: string): string {
+  const packaged = path.join(process.resourcesPath ?? "", "icons", name);
+  if (app.isPackaged && fs.existsSync(packaged)) return packaged;
+  return path.join(dirname, "..", "resources", "icons", name);
+}
 
 /**
  * Boots the daemon as a child `node` process (NOT in-process): native modules
@@ -85,6 +94,7 @@ function createWindow(): BrowserWindow {
     height: 900,
     title: "AURA",
     backgroundColor: "#0e1116",
+    icon: iconPath("icon-256.png"),
     webPreferences: {
       preload: path.join(dirname, "preload.cjs"),
       contextIsolation: true,
@@ -92,7 +102,47 @@ function createWindow(): BrowserWindow {
     },
   });
   void win.loadURL(`${BASE}/app/index.html`);
+  // Close = hide to tray; the daemon (and office) keep running. Quit via tray.
+  win.on("close", (e) => {
+    if (!quitting) {
+      e.preventDefault();
+      win.hide();
+    }
+  });
   return win;
+}
+
+function showMain(win: BrowserWindow, page?: string): void {
+  if (page) void win.loadURL(`${BASE}/${page}`);
+  win.show();
+  win.focus();
+}
+
+function createTray(win: BrowserWindow): void {
+  const image = nativeImage.createFromPath(iconPath("icon-32.png"));
+  tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image);
+  tray.setToolTip("AURA — agent command center");
+  const menu = Menu.buildFromTemplate([
+    { label: "Open Command Center", click: () => showMain(win, "app/index.html") },
+    { label: "Office", click: () => showMain(win, "app/index.html?view=office") },
+    { label: "Board", click: () => showMain(win, "app/index.html?view=board") },
+    { label: "Connections", click: () => showMain(win, "app/index.html?view=connections") },
+    { type: "separator" },
+    {
+      label: "Sync GitHub now",
+      click: () => { void fetch(`${BASE}/api/github/sync`, { method: "POST" }).catch(() => {}); },
+    },
+    {
+      label: "Start at login",
+      type: "checkbox",
+      checked: app.getLoginItemSettings().openAtLogin,
+      click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }),
+    },
+    { type: "separator" },
+    { label: "Quit AURA", click: () => { quitting = true; app.quit(); } },
+  ]);
+  tray.setContextMenu(menu);
+  tray.on("double-click", () => showMain(win));
 }
 
 function openSettings(parent: BrowserWindow): void {
@@ -111,6 +161,16 @@ function openSettings(parent: BrowserWindow): void {
   });
   void win.loadFile(path.join(dirname, "..", "static", "settings.html"));
 }
+
+// Single instance: second launch just surfaces the existing window.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+}
+app.on("second-instance", () => {
+  const [win] = BrowserWindow.getAllWindows();
+  if (win) { win.show(); win.focus(); }
+});
+app.on("before-quit", () => { quitting = true; });
 
 app.whenReady().then(async () => {
   store = new TokenStore(path.join(app.getPath("userData"), "aura"), safeStorage);
@@ -161,6 +221,10 @@ app.whenReady().then(async () => {
     },
   ]);
   Menu.setApplicationMenu(menu);
+  createTray(main);
 });
 
-app.on("window-all-closed", () => app.quit());
+// Tray keeps the app alive when the window hides; quitting only via tray/menu.
+app.on("window-all-closed", () => {
+  if (quitting) app.quit();
+});
