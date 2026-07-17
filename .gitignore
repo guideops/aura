@@ -12,3 +12,4 @@ vault/briefs/
 *.board.db-*
 *.sync.db
 *.sync.db-*
+office.space.json

@@ -30,6 +30,10 @@
       <svg viewBox="0 0 24 24"><path d="m7 6 6 6-6 6M14 18h6"/></svg>
       <span>Executions</span>
     </button>
+    <button class="rail-btn" data-view="cad" title="Space CAD">
+      <svg viewBox="0 0 24 24"><path d="M4 8l8-4 8 4-8 4-8-4Zm0 4 8 4 8-4M4 16l8 4 8-4"/></svg>
+      <span>Space CAD</span>
+    </button>
     <div class="rail-spacer"></div>
     <div id="rail-avatar" title="AURA daemon">
       <div class="avatar-bot">◉‿◉</div>
@@ -84,6 +88,7 @@
       <!-- Views -->
       <iframe id="view-office" class="view active" src="/office.html?embed=1" title="Office"></iframe>
       <iframe id="view-board" class="view" data-src="/board.html" title="Board"></iframe>
+      <iframe id="view-cad" class="view" data-src="/office.html?embed=1&cad=1" title="Space CAD"></iframe>
       <section id="view-sessions" class="view pane">
         <h2>Executions</h2>
         <div id="sessions-list" class="cardlist"></div>
@@ -122,12 +127,15 @@
       <section id="dock" class="dock-panel">
         <div class="dock-tabs">
           <button class="dock-tab active" data-tab="events">EVENT LOG</button>
+          <button class="dock-tab" data-tab="terminal">TERMINAL</button>
           <button class="dock-tab" data-tab="problems">PROBLEMS <span id="problems-count" class="badge" hidden></span></button>
           <button class="dock-tab" data-tab="output">OUTPUT</button>
           <span class="dock-spacer"></span>
+          <select id="dock-session-select" hidden><option value="">select session…</option></select>
           <select id="dock-agent-filter"><option value="">all agents</option></select>
         </div>
         <div id="dock-events" class="dock-body log"></div>
+        <div id="dock-terminal" class="dock-body log" hidden></div>
         <div id="dock-problems" class="dock-body" hidden></div>
         <div id="dock-output" class="dock-body log" hidden></div>
       </section>

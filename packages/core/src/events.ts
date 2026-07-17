@@ -100,5 +100,16 @@ export const ServerMessage = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("approval.resolved"), id: z.string(), status: z.string() }),
   /** Vault markdown changed on disk (external edit); index already rebuilt. */
   z.object({ kind: z.literal("vault.updated"), noteCount: z.number().int().nonnegative() }),
+  /** Managed session stdout/stderr chunk (already line-split). */
+  z.object({
+    kind: z.literal("session.output"),
+    sessionId: z.string(),
+    stream: z.enum(["stdout", "stderr"]),
+    lines: z.array(z.string()),
+  }),
+  /** Managed session status transition (running → exited/failed). */
+  z.object({ kind: z.literal("session.status"), sessionId: z.string(), status: z.string() }),
+  /** Office layout changed via Space CAD; viewers should reload it. */
+  z.object({ kind: z.literal("space.updated") }),
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;

@@ -130,8 +130,8 @@ async function loadGlb(name) {
   cache.set(name, p);
   return p;
 }
-/** Instantiate a static GLB, scaled so its bbox width (x) == targetW (or height == targetH). */
-async function place(name, { targetW, targetH, pos = [0,0,0], rotY = 0 } = {}) {
+/** Instantiate a static GLB into `parent`, scaled so bbox width == targetW (or height == targetH). */
+async function placeInto(parent, name, { targetW, targetH, pos = [0,0,0], rotY = 0 } = {}) {
   try {
     const gltf = await loadGlb(name);
     const obj = gltf.scene.clone(true);
@@ -141,10 +141,10 @@ async function place(name, { targetW, targetH, pos = [0,0,0], rotY = 0 } = {}) {
     if (targetW) s = targetW / size.x;
     else if (targetH) s = targetH / size.y;
     obj.scale.setScalar(s);
-    obj.position.set(pos[0], 0, pos[2]);
+    obj.position.set(pos[0], pos[1] ?? 0, pos[2]);
     obj.rotation.y = rotY;
     S(obj);
-    scene.add(obj);
+    parent.add(obj);
     return obj;
   } catch (e) {
     console.warn(`asset ${name} failed, skipping`, e);
@@ -271,66 +271,85 @@ function buildDesignBoard() {
   return S(g);
 }
 
-// Clickable zone hotspots (invisible pick boxes) → shell navigation.
+// ---------- layout: /api/space drives everything ----------
+const CAD = new URLSearchParams(location.search).has("cad");
 const zonePickers = [];
-function addZoneHotspot(zone, pos, size) {
-  const pick = new THREE.Mesh(
-    new THREE.BoxGeometry(size[0], size[1], size[2]),
-    new THREE.MeshBasicMaterial({ visible: false }),
-  );
-  pick.position.set(pos[0], size[1] / 2, pos[2]);
-  pick.userData.zone = zone;
-  scene.add(pick);
-  zonePickers.push(pick);
-}
+const zoneObjects = new Map(); // primitive id → { group, pick, primitive }
+let spaceData = null;
 
-function addProcedural(build, pos, rotY, label, zone, pickSize = [3, 2.6, 3]) {
-  const g = build();
-  g.position.set(...pos); g.rotation.y = rotY;
-  scene.add(g);
-  const bb = new THREE.Box3().setFromObject(g);
-  const l = makeLabel(label);
-  l.position.set(pos[0], bb.max.y + 0.4, pos[2]);
-  scene.add(l);
-  if (zone) addZoneHotspot(zone, pos, pickSize);
-}
+const ZONE_OF = {
+  desk: "desk", vault: "vault", whiteboard: "whiteboard", "design-board": "whiteboard",
+  "kanban-wall": "kanban", "security-gate": "gate", "skills-library": "skills",
+  "agenda-board": "agenda", council: "council", lounge: null, elevator: null, decor: null,
+};
+const PICK_SIZE = {
+  desk: [3, 1.6, 2.6], vault: [2.4, 2.6, 2.4], whiteboard: [1.6, 2.4, 3],
+  "kanban-wall": [4, 2.6, 1.4], "security-gate": [1.6, 1.6, 2.2], "skills-library": [2.2, 2.4, 2.2],
+  "design-board": [1.6, 2.6, 2.8], "agenda-board": [1.8, 2.4, 2.6], council: [6.4, 2.4, 5.6],
+  lounge: [3.6, 1.4, 3.2], elevator: [2, 2.6, 2], decor: [1.4, 1.4, 1.4],
+};
 
-// ---------- layout ----------
+async function buildDeskInto(g) {
+  await placeInto(g, "desk", { targetW: 2.2 });
+  await placeInto(g, "chairDesk", { targetH: 0.95, pos: [0, 0, 0.9], rotY: Math.PI });
+  await placeInto(g, "computerScreen", { targetH: 0.55, pos: [-0.35, 0, -0.25] });
+  await placeInto(g, "computerKeyboard", { targetW: 0.5, pos: [0.3, 0, 0.05] });
+}
+async function buildSkillsLibInto(g) {
+  await placeInto(g, "bookcaseOpen", { targetH: 2.0 });
+  await placeInto(g, "books", { targetW: 0.5, pos: [0.5, 0, 0.6], rotY: 0.4 });
+}
+async function buildLoungeInto(g) {
+  await placeInto(g, "rugRounded", { targetW: 3.4 });
+  await placeInto(g, "loungeSofa", { targetW: 2.2, pos: [0, 0, -0.4], rotY: Math.PI });
+  await placeInto(g, "loungeChair", { targetW: 1.0, pos: [-1.4, 0, 0.3], rotY: 1.2 });
+  await placeInto(g, "pottedPlant", { targetH: 1.0, pos: [1.4, 0, 0.7] });
+  await placeInto(g, "lampRoundFloor", { targetH: 1.5, pos: [-1.6, 0, -1.0] });
+}
+const BUILDERS = {
+  desk: buildDeskInto,
+  "skills-library": buildSkillsLibInto,
+  lounge: buildLoungeInto,
+  vault: (g) => g.add(buildVault()),
+  whiteboard: (g) => g.add(buildWhiteboard()),
+  "kanban-wall": (g) => g.add(buildKanban()),
+  "security-gate": (g) => g.add(buildGate()),
+  "design-board": (g) => g.add(buildDesignBoard()),
+  "agenda-board": (g) => g.add(buildAgenda()),
+  council: (g) => g.add(buildCouncil()),
+};
+
 async function buildOffice() {
-  // Desks (Kenney): desk + chair + screen + keyboard, twice
-  for (const [dx, dz, ry] of [[0, 0, 0], [2.9, -1.3, -0.35]]) {
-    await place("desk", { targetW: 2.2, pos: [dx, 0, dz], rotY: ry });
-    await place("chairDesk", { targetH: 0.95, pos: [dx + Math.sin(ry) * 0.9, 0, dz + Math.cos(ry) * 0.9], rotY: ry + Math.PI });
-    await place("computerScreen", { targetH: 0.55, pos: [dx - 0.35 * Math.cos(ry), 0, dz - 0.25], rotY: ry });
-    await place("computerKeyboard", { targetW: 0.5, pos: [dx + 0.3 * Math.cos(ry), 0, dz + 0.05], rotY: ry });
+  spaceData = await fetch("/api/space").then((r) => r.json()).catch(() => null);
+  if (!spaceData) { console.warn("no /api/space; empty office"); return; }
+  for (const p of spaceData.primitives) {
+    const builder = BUILDERS[p.kind];
+    if (!builder) continue;
+    const g = new THREE.Group();
+    g.position.set(p.position[0], p.position[1] ?? 0, p.position[2]);
+    g.rotation.y = p.rotationY ?? 0;
+    scene.add(g);
+    await builder(g);
+    // Label floats above the built content.
+    g.updateWorldMatrix(true, true);
+    const bb = new THREE.Box3().setFromObject(g);
+    const h = Math.max(bb.max.y, 1.2) + 0.4;
+    const label = makeLabel(p.label);
+    label.position.set(0, h, 0);
+    g.add(label);
+    // Invisible pick box: shell navigation (view mode) or drag handle (CAD).
+    const size = PICK_SIZE[p.kind] ?? [2, 2, 2];
+    const pick = new THREE.Mesh(
+      new THREE.BoxGeometry(...size),
+      new THREE.MeshBasicMaterial({ visible: false }),
+    );
+    pick.position.y = size[1] / 2;
+    pick.userData.zone = ZONE_OF[p.kind];
+    pick.userData.primId = p.id;
+    g.add(pick);
+    zonePickers.push(pick);
+    zoneObjects.set(p.id, { group: g, pick, primitive: p });
   }
-  // Skills library (Kenney bookcases)
-  await place("bookcaseOpen", { targetH: 2.0, pos: [4.5, 0, -3.5], rotY: -0.7 });
-  await place("books", { targetW: 0.5, pos: [3.9, 0, -2.8], rotY: 0.4 });
-  // Lounge (Kenney sofa + chair + plant + rug + lamp)
-  await place("rugRounded", { targetW: 3.4, pos: [-1.8, 0, 3.6] });
-  await place("loungeSofa", { targetW: 2.2, pos: [-1.8, 0, 3.2], rotY: Math.PI });
-  await place("loungeChair", { targetW: 1.0, pos: [-3.2, 0, 3.9], rotY: 1.2 });
-  await place("pottedPlant", { targetH: 1.0, pos: [-0.4, 0, 4.3] });
-  await place("lampRoundFloor", { targetH: 1.5, pos: [-3.4, 0, 2.6] });
-
-  // Labels for asset zones
-  for (const [text, x, z, y] of [["Desk 01 — Active Compute", 0, 0, 1.6], ["Desk 02 — Active Compute", 2.9, -1.3, 1.6], ["Skills Library", 4.5, -3.5, 2.4], ["Lounge — Idle", -1.8, 3.6, 1.4]]) {
-    const l = makeLabel(text); l.position.set(x, y, z); scene.add(l);
-  }
-
-  // Procedural zones (no CC0 equivalent)
-  addProcedural(buildVault, [-4.2, 0, -3.2], 0.5, "Vault — Secure Storage", "vault", [2.4, 2.6, 2.4]);
-  addProcedural(buildWhiteboard, [-4.9, 0, 1.6], 0, "Whiteboard — Ideas & Planning", "whiteboard", [1.6, 2.4, 3]);
-  addProcedural(buildKanban, [1.5, 0, -4.6], 0, "Kanban Wall — Work Items", "kanban", [4, 2.6, 1.4]);
-  addProcedural(buildGate, [4.7, 0, 1.8], 0, "Security Gate — Access Control", "gate", [1.6, 1.6, 2.2]);
-  addProcedural(buildDesignBoard, [-2.4, 0, -4.6], 0, "Design Board", "whiteboard", [1.6, 2.6, 2.8]);
-  addProcedural(buildAgenda, [7.2, 0, -2.6], 0.6, "Agenda Board — Strategy & Updates", "agenda", [1.8, 2.4, 2.6]);
-  addProcedural(buildCouncil, [9.8, 0, 1.2], -0.35, "Council Chamber — Agent Council", "council", [6.4, 2.4, 5.6]);
-
-  // Hotspots for asset-built zones
-  addZoneHotspot("desk", [1.4, 0, -0.6], [5, 1.6, 3]);
-  addZoneHotspot("skills", [4.3, 0, -3.2], [2.2, 2.4, 2.2]);
 }
 
 const SLOTS = {
@@ -497,11 +516,87 @@ function refreshCardTags() {
   }
 }
 
-// ---------- picking / panel ----------
+// ---------- picking / panel / CAD ----------
 const ray = new THREE.Raycaster();
 const panel = document.getElementById("panel");
-addEventListener("pointerdown", (e) => {
+const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const groundHit = new THREE.Vector3();
+let dragging = null; // { entry, offset:Vector3 }
+let cadDirty = false;
+
+function castPointer(e) {
   ray.setFromCamera(new THREE.Vector2((e.clientX/innerWidth)*2-1, -(e.clientY/innerHeight)*2+1), camera);
+}
+function snap(v) {
+  const grid = spaceData?.room?.gridSize ?? 0.5;
+  return Math.round(v / grid) * grid;
+}
+
+if (CAD) {
+  const bar = document.createElement("div");
+  bar.id = "cadbar";
+  bar.innerHTML = `<b>SPACE CAD</b><span class="hint">drag objects · R rotate · changes snap to grid</span>
+    <button id="cad-save">Save Layout</button><button id="cad-reset">Reload</button><span id="cad-state"></span>`;
+  document.body.appendChild(bar);
+  const style = document.createElement("style");
+  style.textContent = `#cadbar { position:fixed; top:12px; left:50%; transform:translateX(-50%);
+      display:flex; gap:12px; align-items:center; background:#fff; border:1px solid #dde3ea;
+      border-radius:10px; padding:8px 14px; box-shadow:0 6px 18px rgba(30,40,60,.1); z-index:10; }
+    #cadbar .hint { color:#68758a; font-size:11px; }
+    #cadbar button { border:1px solid #dde3ea; background:#f6f8fa; border-radius:7px; padding:5px 12px;
+      font-weight:600; cursor:pointer; }
+    #cadbar #cad-save { background:#3b82f6; border-color:#3b82f6; color:#fff; }
+    #cadbar #cad-state { font-size:11px; color:#16a34a; }`;
+  document.head.appendChild(style);
+
+  document.getElementById("cad-save").onclick = async () => {
+    for (const { group, primitive } of zoneObjects.values()) {
+      primitive.position = [group.position.x, 0, group.position.z];
+      primitive.rotationY = group.rotation.y;
+    }
+    const res = await fetch("/api/space", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(spaceData),
+    });
+    cadDirty = false;
+    document.getElementById("cad-state").textContent = res.ok ? "saved ✓" : "save failed";
+  };
+  document.getElementById("cad-reset").onclick = () => location.reload();
+
+  addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    castPointer(e);
+    if (ray.ray.intersectPlane(groundPlane, groundHit)) {
+      dragging.entry.group.position.x = snap(groundHit.x - dragging.offset.x);
+      dragging.entry.group.position.z = snap(groundHit.z - dragging.offset.z);
+      cadDirty = true;
+      document.getElementById("cad-state").textContent = "unsaved changes";
+    }
+  });
+  addEventListener("pointerup", () => { dragging = null; });
+  addEventListener("keydown", (e) => {
+    if (e.key.toLowerCase() === "r" && dragging) {
+      dragging.entry.group.rotation.y += Math.PI / 12;
+      cadDirty = true;
+    }
+  });
+  addEventListener("beforeunload", (e) => { if (cadDirty) e.preventDefault(); });
+}
+
+addEventListener("pointerdown", (e) => {
+  castPointer(e);
+  if (CAD) {
+    const zoneHits = ray.intersectObjects(zonePickers, false);
+    const primId = zoneHits[0]?.object.userData.primId;
+    const entry = primId ? zoneObjects.get(primId) : null;
+    if (entry && ray.ray.intersectPlane(groundPlane, groundHit)) {
+      dragging = {
+        entry,
+        offset: new THREE.Vector3(groundHit.x - entry.group.position.x, 0, groundHit.z - entry.group.position.z),
+      };
+    }
+    return;
+  }
   const hits = ray.intersectObjects([...agents.values()].map((x) => x.group), true);
   let node = hits[0]?.object;
   while (node && !node.userData.agentId) node = node.parent;
@@ -581,12 +676,13 @@ function connect() {
     }
     else if (msg.kind === "approval.pending") { approvals.set(msg.request.id, msg.request); renderApprovals(); }
     else if (msg.kind === "approval.resolved") { approvals.delete(msg.id); renderApprovals(); }
+    else if (msg.kind === "space.updated" && !CAD) location.reload();
     countEl.textContent = `${agents.size} agents`;
   };
 }
 
 window.__aura = {
-  agents, scene,
+  agents, scene, zoneObjects, get spaceData() { return spaceData; },
   worldHeight(id) {
     const e = agents.get(id); if (!e) return null;
     e.group.updateWorldMatrix(true, true);
@@ -605,7 +701,13 @@ connect();
 
 // ---------- loop ----------
 const clock = new THREE.Clock();
+// Stop rendering when the canvas isn't visible (e.g. hidden shell iframe) —
+// two live WebGL loops otherwise fight for the GPU.
+let renderOn = true;
+new IntersectionObserver((entries) => { renderOn = entries[0].isIntersecting; })
+  .observe(renderer.domElement);
 function tick() {
+  if (!renderOn) { requestAnimationFrame(tick); return; }
   const dt = Math.min(clock.getDelta(), 0.05);
   for (const entry of agents.values()) {
     const p = entry.group.position;

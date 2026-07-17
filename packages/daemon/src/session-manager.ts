@@ -16,6 +16,15 @@ export interface ManagedSession {
   startedAt: number;
 }
 
+export interface OutputChunk {
+  sessionId: string;
+  stream: "stdout" | "stderr";
+  lines: string[];
+}
+
+/** Ring buffer cap per session — enough scrollback, bounded memory. */
+const MAX_OUTPUT_LINES = 1000;
+
 export interface EquippedSkill {
   name: string;
   body: string; // full SKILL.md content, frontmatter included
@@ -46,15 +55,43 @@ export function buildPrompt(prompt: string, skills: EquippedSkill[]): string {
  * via --settings, so spawned sessions stream events to the daemon without
  * touching the project's own .claude/settings.json.
  */
+export interface SessionManagerOptions {
+  /** Called for every captured stdout/stderr chunk (line-split). */
+  onOutput?: (chunk: OutputChunk) => void;
+  /** Called when a session leaves "running". */
+  onStatus?: (sessionId: string, status: ManagedSession["status"]) => void;
+  /** Test seam: command to spawn instead of "claude". */
+  command?: string;
+  /** Test seam: replaces the standard claude args entirely. */
+  rawArgs?: string[];
+}
+
 export class SessionManager {
   private sessions = new Map<string, ManagedSession>();
   private procs = new Map<string, ChildProcess>();
+  private outputs = new Map<string, string[]>();
   private settingsFile: string | null = null;
 
-  constructor(private daemonUrl: string) {}
+  constructor(private daemonUrl: string, private options: SessionManagerOptions = {}) {}
 
   list(): ManagedSession[] {
     return [...this.sessions.values()];
+  }
+
+  /** Buffered scrollback for one session (last MAX_OUTPUT_LINES lines). */
+  output(id: string): string[] | null {
+    return this.outputs.get(id) ?? (this.sessions.has(id) ? [] : null);
+  }
+
+  private capture(id: string, stream: "stdout" | "stderr", data: Buffer): void {
+    const lines = data.toString("utf8").split(/\r?\n/).filter((l) => l.length > 0);
+    if (!lines.length) return;
+    const buf = this.outputs.get(id) ?? [];
+    const tagged = stream === "stderr" ? lines.map((l) => `[stderr] ${l}`) : lines;
+    buf.push(...tagged);
+    if (buf.length > MAX_OUTPUT_LINES) buf.splice(0, buf.length - MAX_OUTPUT_LINES);
+    this.outputs.set(id, buf);
+    this.options.onOutput?.({ sessionId: id, stream, lines });
   }
 
   spawn(input: { cwd: string; prompt: string; model?: string; skills?: EquippedSkill[] }): ManagedSession {
@@ -72,25 +109,32 @@ export class SessionManager {
       startedAt: Date.now(),
     };
 
-    const args = ["-p", fullPrompt, "--settings", this.ensureSettingsFile()];
-    if (input.model) args.push("--model", input.model);
+    const args = this.options.rawArgs ?? (() => {
+      const a = ["-p", fullPrompt, "--settings", this.ensureSettingsFile()];
+      if (input.model) a.push("--model", input.model);
+      return a;
+    })();
 
     // shell:true so Windows resolves claude.cmd from PATH.
-    const child = spawn("claude", args, {
+    const child = spawn(this.options.command ?? "claude", args, {
       cwd: input.cwd,
       shell: true,
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env },
     });
     session.pid = child.pid ?? null;
+    child.stdout?.on("data", (d: Buffer) => this.capture(id, "stdout", d));
+    child.stderr?.on("data", (d: Buffer) => this.capture(id, "stderr", d));
     child.on("exit", (code) => {
       session.status = code === 0 ? "exited" : "failed";
       session.exitCode = code;
       this.procs.delete(id);
+      this.options.onStatus?.(id, session.status);
     });
     child.on("error", () => {
       session.status = "failed";
       this.procs.delete(id);
+      this.options.onStatus?.(id, session.status);
     });
 
     this.sessions.set(id, session);

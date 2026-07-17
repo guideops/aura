@@ -11,7 +11,9 @@ import { EventBus } from "./event-bus.js";
 import { AgentStateStore } from "./state-store.js";
 import { EventLog } from "./persistence.js";
 import { GuardrailEngine } from "./guardrails.js";
-import { SessionManager, type EquippedSkill } from "./session-manager.js";
+import { SessionManager, type EquippedSkill, type SessionManagerOptions } from "./session-manager.js";
+import { SpaceStore } from "./space-store.js";
+import { SpaceFile } from "@aura/core";
 import { Vault } from "./vault.js";
 import { writeBrief } from "./brief.js";
 import { Board } from "./board.js";
@@ -31,6 +33,10 @@ export interface DaemonOptions {
   skillsDir?: string; // skills root (<dir>/<name>/SKILL.md); defaults under cwd
   /** Test seam: provides the GitHub client for /api/github/link. Defaults to Octokit. */
   githubClientFactory?: (cfg: { token: string; projectId: string }) => GitHubProjectClient;
+  /** Space CAD layout file; defaults to <cwd>/office.space.json. */
+  spaceFile?: string;
+  /** Test seam: spawn command/args overrides for SessionManager. */
+  sessionManagerOptions?: Pick<SessionManagerOptions, "command" | "rawArgs">;
 }
 
 export interface Daemon {
@@ -285,8 +291,19 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
   // Managed sessions (assign-card → spawn flow lands on this).
   const sessions = new SessionManager(
     options.daemonUrl ?? `http://127.0.0.1:${process.env["AURA_PORT"] ?? 8311}`,
+    {
+      ...options.sessionManagerOptions,
+      onOutput: (chunk) => broadcast({ kind: "session.output", ...chunk }),
+      onStatus: (sessionId, status) => broadcast({ kind: "session.status", sessionId, status }),
+    },
   );
   app.get("/api/sessions", async () => ({ sessions: sessions.list() }));
+  app.get("/api/sessions/:id/output", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const lines = sessions.output(id);
+    if (lines === null) return reply.code(404).send({ error: "unknown session" });
+    return { lines };
+  });
   // Resolves skill names → {name, body} for equipping; throws on unknown names.
   const resolveSkills = (names: string[]) =>
     names.map((name) => {
@@ -464,6 +481,17 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     }
     broadcast({ kind: "sync.conflicts", count: reviewQueue.length });
     return reply.send({ ok: true, remaining: reviewQueue.length });
+  });
+
+  // ---- Space CAD (office layout) ----
+  const space = new SpaceStore(options.spaceFile ?? path.join(process.cwd(), "office.space.json"));
+  app.get("/api/space", async () => space.load());
+  app.put("/api/space", async (req, reply) => {
+    const parsed = SpaceFile.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    space.save(parsed.data);
+    broadcast({ kind: "space.updated" });
+    return reply.send({ ok: true });
   });
 
   // ---- Shell (command-center UI) data endpoints ----

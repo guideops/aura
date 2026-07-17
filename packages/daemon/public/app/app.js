@@ -19,7 +19,7 @@ function toast(msg) {
 }
 
 // ---------- views ----------
-const VIEWS = ["office", "board", "sessions", "source", "skills", "note"];
+const VIEWS = ["office", "board", "cad", "sessions", "source", "skills", "note"];
 function showView(name) {
   for (const v of VIEWS) {
     const node = $(`#view-${v}`);
@@ -295,8 +295,12 @@ async function loadStatus() {
 function selectDockTab(name) {
   for (const t of document.querySelectorAll(".dock-tab")) t.classList.toggle("active", t.dataset.tab === name);
   $("#dock-events").hidden = name !== "events";
+  $("#dock-terminal").hidden = name !== "terminal";
   $("#dock-problems").hidden = name !== "problems";
   $("#dock-output").hidden = name !== "output";
+  $("#dock-session-select").hidden = name !== "terminal";
+  $("#dock-agent-filter").hidden = name === "terminal";
+  if (name === "terminal") refreshTerminalSessions();
 }
 for (const t of document.querySelectorAll(".dock-tab")) t.onclick = () => selectDockTab(t.dataset.tab);
 
@@ -331,6 +335,45 @@ const LVL = (type) => type.startsWith("tool.deny") ? "DENY" : type.startsWith("t
 function pushEvent(ev) {
   logLine($("#dock-events"), ev.ts, ev.agentId, LVL(ev.type), ev.summary);
 }
+
+// ---------- terminal (per-session output streaming) ----------
+let terminalSession = "";
+async function refreshTerminalSessions() {
+  const { sessions } = await fetch("/api/sessions").then((r) => r.json()).catch(() => ({ sessions: [] }));
+  const sel = $("#dock-session-select");
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">select session…</option>';
+  for (const s of sessions) {
+    const o = el("option", "", `${s.id.slice(0, 8)} · ${s.status}`);
+    o.value = s.id;
+    sel.appendChild(o);
+  }
+  // Keep the current choice; otherwise auto-select the newest running session.
+  const runner = sessions.filter((s) => s.status === "running").at(-1) ?? sessions.at(-1);
+  sel.value = sessions.some((s) => s.id === cur) ? cur : (runner?.id ?? "");
+  if (sel.value !== terminalSession || !$("#dock-terminal").childElementCount) loadTerminal(sel.value);
+}
+async function loadTerminal(sessionId) {
+  terminalSession = sessionId;
+  const host = $("#dock-terminal");
+  host.innerHTML = "";
+  if (!sessionId) {
+    host.appendChild(el("div", "dim", "No session selected. Spawn one from the board or executions."));
+    return;
+  }
+  const res = await fetch(`/api/sessions/${sessionId}/output`);
+  if (!res.ok) return;
+  const { lines } = await res.json();
+  for (const line of lines) appendTerminalLine(line);
+}
+function appendTerminalLine(text) {
+  const host = $("#dock-terminal");
+  const stick = host.scrollTop + host.clientHeight >= host.scrollHeight - 6;
+  host.appendChild(el("div", "log-line", text));
+  while (host.childElementCount > 1000) host.firstElementChild.remove();
+  if (stick) host.scrollTop = host.scrollHeight;
+}
+$("#dock-session-select").onchange = (e) => loadTerminal(e.target.value);
 
 // ---------- problems / approvals ----------
 const approvals = new Map();
@@ -377,6 +420,8 @@ const ACTIONS = [
   { label: "Go to Office", run: () => showView("office") },
   { label: "Go to Board", run: () => showView("board") },
   { label: "Go to Executions", run: () => showView("sessions") },
+  { label: "Open Space CAD (edit office layout)", run: () => showView("cad") },
+  { label: "Show terminal", run: () => selectDockTab("terminal") },
   { label: "Go to Source Control", run: () => showView("source") },
   { label: "Brief now (write agenda note)", run: () => briefNow() },
   { label: "Refresh explorer", run: () => refreshExplorer() },
@@ -471,6 +516,19 @@ function connect() {
     } else if (msg.kind === "approval.resolved") {
       approvals.delete(msg.id);
       renderProblems();
+    } else if (msg.kind === "session.output") {
+      if (msg.sessionId === terminalSession) {
+        for (const line of msg.lines) {
+          appendTerminalLine(msg.stream === "stderr" ? `[stderr] ${line}` : line);
+        }
+      }
+    } else if (msg.kind === "session.status") {
+      logLine($("#dock-output"), Date.now(), null, "SESSION", `${msg.sessionId.slice(0, 8)} → ${msg.status}`);
+      loadSessionsTree();
+      if (!$("#dock-terminal").hidden) refreshTerminalSessions();
+      if ($("#view-sessions").classList.contains("active")) loadSessions();
+    } else if (msg.kind === "space.updated") {
+      toast("office layout saved");
     } else if (msg.kind === "vault.updated") {
       loadVaultTree();
       logLine($("#dock-output"), Date.now(), null, "VAULT", `vault reindexed — ${msg.noteCount} notes`);

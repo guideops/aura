@@ -12,6 +12,8 @@ export const PrimitiveKind = z.enum([
   "lounge",
   "skills-library",
   "design-board",
+  "agenda-board",
+  "council",
   "elevator",
   "decor",
 ]);
