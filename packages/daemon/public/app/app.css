@@ -79,7 +79,10 @@ body {
 .tree-item .badge-m { margin-left: auto; font-size: 10px; color: var(--warn); font-weight: 700; }
 .tree-item .ico { flex: none; font-size: 11px; color: var(--dim); }
 .tree-folder > .tree-caret { font-weight: 500; }
-.tree-foot { border-top: 1px solid var(--line); padding: 4px 6px; }
+.tree-foot { border-top: 1px solid var(--line); padding: 4px 6px; max-height: 40vh; overflow-y: auto; }
+.tree-body.scrolly { max-height: 150px; overflow-y: auto; }
+.tl-item { padding: 2px 8px; font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl-item b { font-weight: 600; }
 
 /* ---- main ---- */
 #main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }

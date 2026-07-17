@@ -139,11 +139,38 @@ async function loadSessionsTree() {
     host.appendChild(item);
   }
 }
+// Outline: office layout zones from /api/space; click focuses the office view.
+async function loadOutline() {
+  const space = await fetch("/api/space").then((r) => r.json());
+  const host = $("#tree-outline");
+  host.innerHTML = "";
+  for (const p of space.primitives) {
+    const item = el("div", "tree-item");
+    item.append(el("span", "ico", "▣"), el("span", "", p.label));
+    item.title = `${p.id} — ${p.kind}`;
+    item.onclick = () => showView("office");
+    host.appendChild(item);
+  }
+}
+
+// Timeline: newest-first condensed event feed.
+const TIMELINE_MAX = 30;
+function pushTimeline(ev) {
+  const host = $("#tree-timeline");
+  const item = el("div", "tl-item");
+  const who = el("b", "", ev.agentId);
+  who.style.color = agentColor(ev.agentId);
+  item.append(el("span", "", `${ts(ev.ts)} `), who, el("span", "", ` ${ev.summary}`));
+  host.prepend(item);
+  while (host.childElementCount > TIMELINE_MAX) host.lastElementChild.remove();
+}
+
 function refreshExplorer() {
   loadAgents().catch(() => {});
   loadVaultTree().catch(() => {});
   loadSkills().catch(() => {});
   loadSessionsTree().catch(() => {});
+  loadOutline().catch(() => {});
 }
 $("#explorer-refresh").onclick = refreshExplorer;
 
@@ -505,6 +532,7 @@ function connect() {
       loadUsage();
     } else if (msg.kind === "event") {
       pushEvent(msg.event);
+      pushTimeline(msg.event);
       scheduleStatus();
     } else if (msg.kind === "snapshot") {
       loadAgents();
@@ -529,6 +557,7 @@ function connect() {
       if ($("#view-sessions").classList.contains("active")) loadSessions();
     } else if (msg.kind === "space.updated") {
       toast("office layout saved");
+      loadOutline().catch(() => {});
     } else if (msg.kind === "vault.updated") {
       loadVaultTree();
       logLine($("#dock-output"), Date.now(), null, "VAULT", `vault reindexed — ${msg.noteCount} notes`);
@@ -550,6 +579,7 @@ async function boot() {
   try {
     const { events } = await fetch("/api/events/recent").then((r) => r.json());
     for (const ev of events.slice(-120)) pushEvent(ev);
+    for (const ev of events.slice(-30)) pushTimeline(ev);
   } catch { /* offline */ }
   logLine($("#dock-output"), Date.now(), null, "INFO", "AURA command center shell started");
   refreshExplorer();

@@ -319,45 +319,77 @@ const BUILDERS = {
   council: (g) => g.add(buildCouncil()),
 };
 
+async function addPrimitive(p) {
+  const builder = BUILDERS[p.kind];
+  if (!builder) return null;
+  const g = new THREE.Group();
+  g.position.set(p.position[0], p.position[1] ?? 0, p.position[2]);
+  g.rotation.y = p.rotationY ?? 0;
+  scene.add(g);
+  await builder(g);
+  // Label floats above the built content.
+  g.updateWorldMatrix(true, true);
+  const bb = new THREE.Box3().setFromObject(g);
+  const h = Math.max(bb.max.y, 1.2) + 0.4;
+  const label = makeLabel(p.label);
+  label.position.set(0, h, 0);
+  g.add(label);
+  // Invisible pick box: shell navigation (view mode) or drag handle (CAD).
+  const size = PICK_SIZE[p.kind] ?? [2, 2, 2];
+  const pick = new THREE.Mesh(
+    new THREE.BoxGeometry(...size),
+    new THREE.MeshBasicMaterial({ visible: false }),
+  );
+  pick.position.y = size[1] / 2;
+  pick.userData.zone = ZONE_OF[p.kind];
+  pick.userData.primId = p.id;
+  g.add(pick);
+  zonePickers.push(pick);
+  const entry = { group: g, pick, primitive: p, label };
+  zoneObjects.set(p.id, entry);
+  return entry;
+}
+
 async function buildOffice() {
   spaceData = await fetch("/api/space").then((r) => r.json()).catch(() => null);
   if (!spaceData) { console.warn("no /api/space; empty office"); return; }
-  for (const p of spaceData.primitives) {
-    const builder = BUILDERS[p.kind];
-    if (!builder) continue;
-    const g = new THREE.Group();
-    g.position.set(p.position[0], p.position[1] ?? 0, p.position[2]);
-    g.rotation.y = p.rotationY ?? 0;
-    scene.add(g);
-    await builder(g);
-    // Label floats above the built content.
-    g.updateWorldMatrix(true, true);
-    const bb = new THREE.Box3().setFromObject(g);
-    const h = Math.max(bb.max.y, 1.2) + 0.4;
-    const label = makeLabel(p.label);
-    label.position.set(0, h, 0);
-    g.add(label);
-    // Invisible pick box: shell navigation (view mode) or drag handle (CAD).
-    const size = PICK_SIZE[p.kind] ?? [2, 2, 2];
-    const pick = new THREE.Mesh(
-      new THREE.BoxGeometry(...size),
-      new THREE.MeshBasicMaterial({ visible: false }),
-    );
-    pick.position.y = size[1] / 2;
-    pick.userData.zone = ZONE_OF[p.kind];
-    pick.userData.primId = p.id;
-    g.add(pick);
-    zonePickers.push(pick);
-    zoneObjects.set(p.id, { group: g, pick, primitive: p });
-  }
+  for (const p of spaceData.primitives) await addPrimitive(p);
+  buildSlots();
 }
 
+// Agent slots derive from the live layout: move a desk in Space CAD and
+// agents sit at its new position. Fallbacks match the shipped default layout.
 const SLOTS = {
   desk: [[0,0,1.0],[2.9,0,-0.3],[-0.9,0,0.9],[3.7,0,-1.2],[0.9,0,1.3],[2.1,0,0.3]],
   gate: [[3.8,0,1.8],[3.8,0,2.6]],
   lounge: [[-1.4,0,3.3],[-2.3,0,3.5],[-1.0,0,4.0]],
+  council: [],
   idleWander: [[0.5,0,2.0],[-3.0,0,-1.5],[2.0,0,3.0],[-0.5,0,-2.5]],
 };
+function buildSlots() {
+  const world = (entry, off) => {
+    entry.group.updateWorldMatrix(true, false);
+    const v = entry.group.localToWorld(new THREE.Vector3(off[0], 0, off[2]));
+    return [v.x, 0, v.z];
+  };
+  const ofKind = (kind) => [...zoneObjects.values()].filter((e) => e.primitive.kind === kind);
+  const desks = ofKind("desk");
+  if (desks.length) {
+    SLOTS.desk = desks.flatMap((e) => [world(e, [0, 0, 1.0]), world(e, [-0.9, 0, 0.9]), world(e, [0.9, 0, 1.3])]);
+  }
+  const gate = ofKind("security-gate")[0];
+  if (gate) SLOTS.gate = [world(gate, [-0.9, 0, 0]), world(gate, [-0.9, 0, 0.8])];
+  const lounge = ofKind("lounge")[0];
+  if (lounge) SLOTS.lounge = [world(lounge, [0.4, 0, -0.3]), world(lounge, [-0.6, 0, 0.1]), world(lounge, [0.9, 0, 0.5])];
+  const council = ofKind("council")[0];
+  if (council) {
+    SLOTS.council = [];
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2 + 0.3;
+      SLOTS.council.push(world(council, [Math.cos(a) * 1.7, 0, Math.sin(a) * 1.7]));
+    }
+  }
+}
 
 // ---------- robot template (Quaternius, CC0) ----------
 let robotTemplate = null; // { scene, clips }
@@ -405,13 +437,16 @@ function skeletonHeight(group) {
   return maxY > minY ? maxY - minY : 0;
 }
 
-let deskCursor = 0, gateCursor = 0, loungeCursor = 0;
+let deskCursor = 0, gateCursor = 0, loungeCursor = 0, councilCursor = 0;
 function slotFor(a, entry) {
   switch (a.status) {
     case "active": case "researching": case "reading":
       entry.slot ??= SLOTS.desk[(deskCursor++) % SLOTS.desk.length];
       return entry.slot;
     case "blocked": return SLOTS.gate[(gateCursor++) % SLOTS.gate.length];
+    case "review":
+      if (SLOTS.council.length) return SLOTS.council[(councilCursor++) % SLOTS.council.length];
+      return SLOTS.lounge[(loungeCursor++) % SLOTS.lounge.length];
     case "idle": case "success": return SLOTS.lounge[(loungeCursor++) % SLOTS.lounge.length];
     case "offline": return [entry.group.position.x, -1.6, entry.group.position.z];
     default: return SLOTS.idleWander[Math.floor(Math.random()*SLOTS.idleWander.length)];
@@ -532,22 +567,142 @@ function snap(v) {
   return Math.round(v / grid) * grid;
 }
 
+let selected = null; // zoneObjects entry
+let selectRing = null;
+
+function markDirty() {
+  cadDirty = true;
+  document.getElementById("cad-state").textContent = "unsaved changes";
+}
+function setSelected(entry) {
+  selected = entry;
+  if (!selectRing) {
+    selectRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.9, 1.05, 40),
+      new THREE.MeshBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.7, side: THREE.DoubleSide }),
+    );
+    selectRing.rotation.x = -Math.PI / 2;
+    selectRing.position.y = 0.03;
+  }
+  selectRing.parent?.remove(selectRing);
+  if (entry) {
+    const size = PICK_SIZE[entry.primitive.kind] ?? [2, 2, 2];
+    const r = Math.max(size[0], size[2]) * 0.62;
+    selectRing.geometry.dispose();
+    selectRing.geometry = new THREE.RingGeometry(r, r + 0.14, 48);
+    entry.group.add(selectRing);
+  }
+  syncInspector();
+}
+function syncInspector() {
+  const panel = document.getElementById("cad-inspector");
+  if (!panel) return;
+  panel.style.display = selected ? "block" : "none";
+  if (!selected) return;
+  const p = selected.primitive;
+  document.getElementById("cad-i-title").textContent = `${p.id} (${p.kind})`;
+  document.getElementById("cad-i-label").value = p.label;
+  document.getElementById("cad-i-btype").value = p.binding?.type ?? "none";
+  document.getElementById("cad-i-btarget").value = p.binding?.target ?? "";
+}
+
 if (CAD) {
   const bar = document.createElement("div");
   bar.id = "cadbar";
-  bar.innerHTML = `<b>SPACE CAD</b><span class="hint">drag objects · R rotate · changes snap to grid</span>
+  const kinds = Object.keys(BUILDERS);
+  bar.innerHTML = `<b>SPACE CAD</b><span class="hint">click select · drag move · R rotate · Del delete</span>
+    <select id="cad-kind">${kinds.map((k) => `<option>${k}</option>`).join("")}</select>
+    <button id="cad-add">Add</button><button id="cad-dup">Duplicate</button><button id="cad-del">Delete</button>
     <button id="cad-save">Save Layout</button><button id="cad-reset">Reload</button><span id="cad-state"></span>`;
   document.body.appendChild(bar);
+  const inspector = document.createElement("div");
+  inspector.id = "cad-inspector";
+  inspector.innerHTML = `<h4 id="cad-i-title"></h4>
+    <label>Label <input id="cad-i-label" /></label>
+    <label>Binding <select id="cad-i-btype">
+      <option>none</option><option>directory</option><option>vault</option>
+      <option>board</option><option>gate</option><option>skills</option></select></label>
+    <label>Target <input id="cad-i-btarget" placeholder="path / id" /></label>`;
+  document.body.appendChild(inspector);
   const style = document.createElement("style");
   style.textContent = `#cadbar { position:fixed; top:12px; left:50%; transform:translateX(-50%);
-      display:flex; gap:12px; align-items:center; background:#fff; border:1px solid #dde3ea;
+      display:flex; gap:8px; align-items:center; background:#fff; border:1px solid #dde3ea;
       border-radius:10px; padding:8px 14px; box-shadow:0 6px 18px rgba(30,40,60,.1); z-index:10; }
     #cadbar .hint { color:#68758a; font-size:11px; }
-    #cadbar button { border:1px solid #dde3ea; background:#f6f8fa; border-radius:7px; padding:5px 12px;
-      font-weight:600; cursor:pointer; }
+    #cadbar button, #cadbar select { border:1px solid #dde3ea; background:#f6f8fa; border-radius:7px;
+      padding:5px 10px; font-weight:600; cursor:pointer; font-size:12px; }
     #cadbar #cad-save { background:#3b82f6; border-color:#3b82f6; color:#fff; }
-    #cadbar #cad-state { font-size:11px; color:#16a34a; }`;
+    #cadbar #cad-state { font-size:11px; color:#16a34a; }
+    #cad-inspector { position:fixed; right:12px; top:12px; width:230px; background:#fff;
+      border:1px solid #dde3ea; border-radius:10px; padding:12px 14px; z-index:10; display:none;
+      box-shadow:0 6px 18px rgba(30,40,60,.1); }
+    #cad-inspector h4 { margin:0 0 8px; font-size:12px; }
+    #cad-inspector label { display:block; font-size:11px; color:#68758a; margin-bottom:8px; }
+    #cad-inspector input, #cad-inspector select { width:100%; border:1px solid #dde3ea;
+      border-radius:6px; padding:5px 8px; font-size:12px; margin-top:2px; box-sizing:border-box; }`;
   document.head.appendChild(style);
+
+  const refreshLabel = (entry) => {
+    // Rebuild the label sprite texture with the new text.
+    const fresh = makeLabel(entry.primitive.label);
+    entry.label.material.map?.dispose();
+    entry.label.material.map = fresh.material.map;
+    entry.label.material.needsUpdate = true;
+  };
+  document.getElementById("cad-i-label").oninput = (e) => {
+    if (!selected) return;
+    selected.primitive.label = e.target.value;
+    refreshLabel(selected);
+    markDirty();
+  };
+  document.getElementById("cad-i-btype").onchange = (e) => {
+    if (!selected) return;
+    selected.primitive.binding = { type: e.target.value, target: selected.primitive.binding?.target ?? "" };
+    markDirty();
+  };
+  document.getElementById("cad-i-btarget").oninput = (e) => {
+    if (!selected) return;
+    selected.primitive.binding = { type: selected.primitive.binding?.type ?? "none", target: e.target.value };
+    markDirty();
+  };
+
+  const freshId = (kind) => `${kind}-${Date.now().toString(36)}${Math.floor(Math.random() * 36).toString(36)}`;
+  document.getElementById("cad-add").onclick = async () => {
+    const kind = document.getElementById("cad-kind").value;
+    if (!BUILDERS[kind]) return;
+    const p = {
+      id: freshId(kind), kind, label: kind.replace(/-/g, " "),
+      position: [2.5, 0, 0], rotationY: 0,
+      scale: [1, 1, 1], binding: { type: "none", target: "" },
+    };
+    const entry = await addPrimitive(p);
+    if (!entry) return;
+    spaceData.primitives.push(p);
+    setSelected(entry);
+    markDirty();
+  };
+  document.getElementById("cad-dup").onclick = async () => {
+    if (!selected) return;
+    const src = selected.primitive;
+    const p = JSON.parse(JSON.stringify(src));
+    p.id = freshId(p.kind);
+    p.position = [snap(src.position[0] + 1.5), 0, snap(src.position[2] + 1.5)];
+    spaceData.primitives.push(p);
+    setSelected(await addPrimitive(p));
+    markDirty();
+  };
+  const deleteSelected = () => {
+    if (!selected) return;
+    const { group, pick, primitive } = selected;
+    selectRing?.parent?.remove(selectRing);
+    scene.remove(group);
+    zonePickers.splice(zonePickers.indexOf(pick), 1);
+    zoneObjects.delete(primitive.id);
+    spaceData.primitives = spaceData.primitives.filter((x) => x.id !== primitive.id);
+    setSelected(null);
+    markDirty();
+  };
+  document.getElementById("cad-del").onclick = deleteSelected;
 
   document.getElementById("cad-save").onclick = async () => {
     for (const { group, primitive } of zoneObjects.values()) {
@@ -569,26 +724,32 @@ if (CAD) {
     if (ray.ray.intersectPlane(groundPlane, groundHit)) {
       dragging.entry.group.position.x = snap(groundHit.x - dragging.offset.x);
       dragging.entry.group.position.z = snap(groundHit.z - dragging.offset.z);
-      cadDirty = true;
-      document.getElementById("cad-state").textContent = "unsaved changes";
+      markDirty();
     }
   });
   addEventListener("pointerup", () => { dragging = null; });
   addEventListener("keydown", (e) => {
-    if (e.key.toLowerCase() === "r" && dragging) {
-      dragging.entry.group.rotation.y += Math.PI / 12;
-      cadDirty = true;
+    if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+    if (e.key.toLowerCase() === "r" && selected) {
+      selected.group.rotation.y += Math.PI / 12;
+      markDirty();
+    } else if ((e.key === "Delete" || e.key === "Backspace") && selected) {
+      deleteSelected();
+    } else if (e.key === "Escape") {
+      setSelected(null);
     }
   });
   addEventListener("beforeunload", (e) => { if (cadDirty) e.preventDefault(); });
 }
 
 addEventListener("pointerdown", (e) => {
+  if (e.target.closest?.("#cadbar, #cad-inspector")) return;
   castPointer(e);
   if (CAD) {
     const zoneHits = ray.intersectObjects(zonePickers, false);
     const primId = zoneHits[0]?.object.userData.primId;
     const entry = primId ? zoneObjects.get(primId) : null;
+    setSelected(entry ?? null);
     if (entry && ray.ray.intersectPlane(groundPlane, groundHit)) {
       dragging = {
         entry,
