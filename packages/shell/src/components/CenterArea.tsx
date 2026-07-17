@@ -3,9 +3,9 @@ import { KanbanWall } from "./KanbanWall";
 export type CenterTab = "kanban" | "office" | "cad";
 
 const TABS: { id: CenterTab; label: string }[] = [
-  { id: "kanban", label: "Kanban Wall" },
   { id: "office", label: "Office" },
-  { id: "cad", label: "Spatial CAD" },
+  { id: "kanban", label: "Kanban Wall" },
+  { id: "cad", label: "Space CAD" },
 ];
 
 export function CenterArea({
@@ -38,10 +38,10 @@ export function CenterArea({
           <KanbanWall selectedCard={selectedCard} onSelectCard={onSelectCard} />
         )}
         {tab === "office" && (
-          <iframe className="embed-frame" src="/office.html" title="Office" />
+          <iframe className="embed-frame" src="/office.html?embed=1" title="Office" />
         )}
         {tab === "cad" && (
-          <iframe className="embed-frame" src="/office.html?cad=1" title="Spatial CAD" />
+          <iframe className="embed-frame" src="/office.html?embed=1&cad=1" title="Space CAD" />
         )}
       </div>
     </section>

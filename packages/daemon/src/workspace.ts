@@ -39,13 +39,21 @@ export function gitStatus(root: string): Promise<Map<string, "M" | "U" | "A" | "
   });
 }
 
-export function gitBranch(root: string): Promise<{ branch: string; dirty: boolean } | null> {
+export interface GitChange {
+  path: string;
+  status: "M" | "U" | "A" | "D";
+}
+
+export function gitBranch(
+  root: string,
+): Promise<{ branch: string; dirty: boolean; changes: GitChange[] } | null> {
   return new Promise((resolve) => {
     execFile("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: root, timeout: 5000 }, (err, stdout) => {
       if (err) return resolve(null);
       const branch = stdout.trim();
-      execFile("git", ["status", "--porcelain"], { cwd: root, timeout: 5000 }, (err2, out2) => {
-        resolve({ branch, dirty: !err2 && out2.trim().length > 0 });
+      void gitStatus(root).then((map) => {
+        const changes = [...map.entries()].map(([path, status]) => ({ path, status }));
+        resolve({ branch, dirty: changes.length > 0, changes });
       });
     });
   });

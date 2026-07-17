@@ -4,18 +4,32 @@ import { TopBar } from "./components/TopBar";
 import { ActivityBar, type ActivityView } from "./components/ActivityBar";
 import { Explorer } from "./components/Explorer";
 import { CenterArea, type CenterTab } from "./components/CenterArea";
-import { SystemOverview } from "./components/SystemOverview";
-import { Inspector } from "./components/Inspector";
+import { RightRail } from "./components/RightRail";
 import { BottomPanel } from "./components/BottomPanel";
 import { StatusBar } from "./components/StatusBar";
+import { ActionRequestModal } from "./components/ActionRequestModal";
 import { startWs } from "./lib/store";
+import type { ZoneContext } from "./lib/zones";
 
 export function App() {
   const [view, setView] = useState<ActivityView>("explorer");
-  const [tab, setTab] = useState<CenterTab>("kanban");
+  const [tab, setTab] = useState<CenterTab>("office");
   const [selectedCard, setSelectedCard] = useState<string | null>(null);
+  const [zone, setZone] = useState<ZoneContext | null>(null);
 
   useEffect(() => startWs(), []);
+
+  // Office objects clicked inside the embedded office.html arrive here.
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      const d = e.data as { type?: string; zone?: string; label?: string };
+      if (d?.type === "aura:zone" && d.zone) {
+        setZone({ zone: d.zone, ...(d.label ? { label: d.label } : {}) });
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
 
   return (
     <div className="shell">
@@ -24,7 +38,7 @@ export function App() {
         <ActivityBar view={view} onSelect={setView} onOpenTab={setTab} />
         <PanelGroup direction="horizontal" className="shell-panels">
           <Panel defaultSize={16} minSize={10} collapsible>
-            <Explorer view={view} onOpenTab={setTab} />
+            <Explorer view={view} onOpenTab={setTab} onSelectCard={setSelectedCard} />
           </Panel>
           <PanelResizeHandle className="rh rh-v" />
           <Panel defaultSize={62} minSize={30}>
@@ -45,14 +59,19 @@ export function App() {
           </Panel>
           <PanelResizeHandle className="rh rh-v" />
           <Panel defaultSize={22} minSize={14} collapsible>
-            <div className="right-stack">
-              <SystemOverview onOpenOffice={() => setTab("office")} />
-              <Inspector cardId={selectedCard} onClose={() => setSelectedCard(null)} />
-            </div>
+            <RightRail
+              tab={tab}
+              selectedCard={selectedCard}
+              onSelectCard={setSelectedCard}
+              onOpenTab={setTab}
+              zone={zone}
+              onCloseZone={() => setZone(null)}
+            />
           </Panel>
         </PanelGroup>
       </div>
       <StatusBar />
+      <ActionRequestModal />
     </div>
   );
 }

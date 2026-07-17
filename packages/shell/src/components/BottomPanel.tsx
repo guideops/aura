@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentEvent } from "@aura/core";
+import { api } from "../lib/api";
+import { usePoll } from "../lib/poll";
 import { agentColor, useShell } from "../lib/store";
 
 type BottomTab = "terminal" | "output" | "eventlog" | "problems";
@@ -53,12 +55,62 @@ export function BottomPanel() {
         ))}
       </div>
       <div className="bottom-body">
-        {tab === "terminal" && <TerminalView events={events} />}
-        {tab === "output" && <OutputView />}
-        {tab === "eventlog" && <EventLogView events={events} />}
-        {tab === "problems" && <ProblemsView problems={problems} />}
+        <div className="bottom-tab-content">
+          {tab === "terminal" && <TerminalView events={events} />}
+          {tab === "output" && <OutputView />}
+          {tab === "eventlog" && <EventLogView events={events} />}
+          {tab === "problems" && <ProblemsView problems={problems} />}
+        </div>
+        <DockSide />
       </div>
     </section>
+  );
+}
+
+/** Orchestration Status + System Services (reference S2/S4 dock panels). */
+function DockSide() {
+  const st = usePoll(() => api.status(), 10000);
+  if (!st) return null;
+  const o = st.orchestration;
+  const svc: [string, boolean, string][] = [
+    ["Daemon", st.services.daemon.ok, `v${st.services.daemon.version}`],
+    ["Obsidian Vault", st.services.vault.ok, `${st.services.vault.notes} notes`],
+    ["Board", st.services.board.ok, `${st.services.board.cards} cards`],
+    ["GitHub Sync", st.services.github.linked, st.services.github.linked ? "Linked" : "Not linked"],
+    ["Agentic Workspace", st.services.workspace?.ok ?? false,
+      st.services.workspace?.peers ? `${st.services.workspace.peers} peer(s)` : "Not linked"],
+    ["Hermes", st.services.hermes?.enabled ?? false, st.services.hermes?.enabled ? "Enabled" : "Off"],
+  ];
+  return (
+    <div className="dock-side">
+      <div className="dock-widget">
+        <div className="dock-widget-title">Orchestration Status</div>
+        <dl className="task-ctx">
+          <dt>Heartbeat</dt><dd>Every {Math.round(o.heartbeatMs / 1000)}s</dd>
+          <dt>Uptime</dt><dd>{Math.floor(o.uptimeMs / 60000)}m</dd>
+          <dt>Tasks</dt><dd>{o.tasksPending} pending</dd>
+          <dt>Sessions</dt><dd>{o.sessionsRunning} running</dd>
+          <dt>Agents Online</dt><dd>{o.agentsOnline} / {o.agentsTotal}</dd>
+        </dl>
+        <div className="progress-track slim">
+          <div
+            className="progress-fill green"
+            style={{ width: o.agentsTotal ? `${Math.round((o.agentsOnline / o.agentsTotal) * 100)}%` : "0%" }}
+          />
+        </div>
+      </div>
+      <div className="dock-widget">
+        <div className="dock-widget-title">System Services</div>
+        <dl className="task-ctx">
+          {svc.map(([name, ok, label]) => (
+            <div key={name} className="kv-line">
+              <dt>{name}</dt>
+              <dd className={ok ? "svc-ok" : "svc-bad"}>● {label}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </div>
   );
 }
 
@@ -200,7 +252,7 @@ function ProblemsView({ problems }: { problems: AgentEvent[] }) {
       {approvals.map((a) => (
         <div key={a.id} className="term-line">
           <span className="term-level lv-warn">[APPROVAL]</span>
-          <span className="term-msg">{String(a.summary ?? a.id)} — resolve in office view</span>
+          <span className="term-msg">{a.agentId}: {a.tool} — {a.inputPreview.slice(0, 80)}</span>
         </div>
       ))}
       {problems.slice(-100).reverse().map((e) => (

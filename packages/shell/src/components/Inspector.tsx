@@ -25,6 +25,7 @@ export function Inspector({
 }) {
   const cards = useShell((s) => s.cards);
   const events = useShell((s) => s.events);
+  const cardActivity = useShell((s) => s.cardActivity);
   const card = useMemo(
     () => (cardId ? (cards.find((c) => c.id === cardId) as CardExt | undefined) : undefined),
     [cards, cardId],
@@ -41,14 +42,20 @@ export function Inspector({
   }
 
   const checklist = card.checklist ?? [];
-  const activity = events
+  const eventActivity = events
     .filter(
       (e) =>
         (card.sessionId && e.sessionId === card.sessionId) ||
         (card.assignee && e.agentId === card.assignee),
     )
-    .slice(-6)
-    .reverse();
+    .slice(-4)
+    .map((e) => ({ ts: e.ts, agentId: e.agentId, text: e.summary || e.type }));
+  const boardActivity = (cardActivity[card.id] ?? []).map((a) => ({
+    ts: a.ts,
+    agentId: card.assignee ?? "operator",
+    text: a.text,
+  }));
+  const activity = [...eventActivity, ...boardActivity].sort((a, b) => b.ts - a.ts).slice(0, 8);
 
   const patchChecklist = (items: { id: string; text: string; done: boolean }[]) =>
     void api.patchCard(card.id, { checklist: items } as Partial<Card>);
@@ -57,7 +64,11 @@ export function Inspector({
     <div className="inspector">
       <div className="panel-title">
         {card.key}
-        <span className="panel-title-actions" onClick={onClose} style={{ cursor: "pointer" }}>✕</span>
+        <span className="insp-actions">
+          <span className="clickable" title="Copy card key" onClick={() => void navigator.clipboard.writeText(card.key).catch(() => {})}>🔗</span>
+          <span className="clickable" title="Delete card" onClick={() => { if (confirm(`Delete ${card.key}?`)) { void api.deleteCard(card.id); onClose(); } }}>🗑</span>
+          <span className="clickable" title="Close" onClick={onClose}>✕</span>
+        </span>
       </div>
       <div className="inspector-body">
         <h3 className="inspector-title">{card.title}</h3>
@@ -142,11 +153,11 @@ export function Inspector({
 
         <div className="checklist-head"><span>Activity</span></div>
         {activity.length === 0 && <div className="muted small">No recent activity</div>}
-        {activity.map((e) => (
-          <div key={e.id} className="activity-row">
+        {activity.map((e, i) => (
+          <div key={`${e.ts}-${i}`} className="activity-row">
             <i className="avatar-dot" style={{ background: agentColor(e.agentId) }} />
             <span className="activity-text">
-              <b>{e.agentId}</b> {e.summary || e.type}
+              <b>{e.agentId}</b> {e.text}
             </span>
             <span className="activity-time">{new Date(e.ts).toLocaleTimeString()}</span>
           </div>

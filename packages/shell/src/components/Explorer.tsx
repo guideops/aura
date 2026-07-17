@@ -3,23 +3,32 @@ import { api, type TreeNode } from "../lib/api";
 import { agentColor, useShell } from "../lib/store";
 import type { ActivityView } from "./ActivityBar";
 import type { CenterTab } from "./CenterArea";
+import { SearchPanel } from "./sidebar/SearchPanel";
+import { SourceControlPanel } from "./sidebar/SourceControlPanel";
+import { ExecutionsPanel } from "./sidebar/ExecutionsPanel";
+import { ConnectPanel } from "./sidebar/ConnectPanel";
 
 export function Explorer({
   view,
   onOpenTab,
+  onSelectCard,
 }: {
   view: ActivityView;
   onOpenTab: (t: CenterTab) => void;
+  onSelectCard: (id: string | null) => void;
 }) {
-  if (view !== "explorer") {
-    return (
-      <aside className="sidebar">
-        <div className="panel-title">{view.toUpperCase()}</div>
-        <div className="sidebar-empty">Coming soon</div>
-      </aside>
-    );
+  switch (view) {
+    case "search":
+      return <SearchPanel onOpenTab={onOpenTab} onSelectCard={onSelectCard} />;
+    case "scm":
+      return <SourceControlPanel />;
+    case "executions":
+      return <ExecutionsPanel />;
+    case "connect":
+      return <ConnectPanel />;
+    default:
+      return <ExplorerTree onOpenTab={onOpenTab} />;
   }
-  return <ExplorerTree onOpenTab={onOpenTab} />;
 }
 
 function ExplorerTree({ onOpenTab }: { onOpenTab: (t: CenterTab) => void }) {

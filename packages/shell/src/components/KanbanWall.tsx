@@ -11,6 +11,7 @@ const COLUMNS: { status: CardStatus; title: string; tone: string }[] = [
 ];
 
 type SortMode = "manual" | "updated" | "title" | "progress";
+type GroupMode = "status" | "assignee" | "tag";
 
 export function KanbanWall({
   selectedCard,
@@ -22,13 +23,14 @@ export function KanbanWall({
   const cards = useShell((s) => s.cards);
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<SortMode>("updated");
+  const [group, setGroup] = useState<GroupMode>("status");
   const [showNew, setShowNew] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
   const [repo, setRepo] = useState<string | null>(null);
 
   useEffect(() => {
     api.listCards().then(setCards).catch(() => {});
-    api.githubStatus().then((s) => setRepo(s.linked ? (s.repo ?? "linked") : null)).catch(() => {});
+    api.githubStatus().then((s) => setRepo(s.linked ? "linked" : null)).catch(() => {});
   }, []);
 
   const visible = useMemo(() => {
@@ -74,6 +76,16 @@ export function KanbanWall({
           />
           <select
             className="sort-select"
+            value={group}
+            onChange={(e) => setGroup(e.target.value as GroupMode)}
+            title="Group"
+          >
+            <option value="status">Group: Status</option>
+            <option value="assignee">Group: Assignee</option>
+            <option value="tag">Group: Tag</option>
+          </select>
+          <select
+            className="sort-select"
             value={sort}
             onChange={(e) => setSort(e.target.value as SortMode)}
             title="Sort"
@@ -88,43 +100,67 @@ export function KanbanWall({
         </div>
       </div>
       <div className="kanban-columns">
-        {COLUMNS.map((col) => {
-          const colCards = visible.filter((c) => c.status === col.status);
-          return (
-            <div
-              key={col.status}
-              className={`kanban-col ${col.tone}`}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={() => drop(col.status)}
-            >
-              <div className="col-head">
-                <span className="col-title">{col.title}</span>
-                <span className="col-count">{colCards.length}</span>
-              </div>
-              <div className="col-cards">
-                {colCards.map((card) => (
-                  <CardTile
-                    key={card.id}
-                    card={card}
-                    selected={card.id === selectedCard}
-                    onSelect={() => onSelectCard(card.id === selectedCard ? null : card.id)}
-                    onDragStart={() => setDragId(card.id)}
-                  />
-                ))}
-                <button
-                  className="add-card"
-                  onClick={() => setShowNew(true)}
-                >
-                  ＋ Add Card
-                </button>
-              </div>
+        {buildColumns(group, visible).map((col) => (
+          <div
+            key={col.key}
+            className={`kanban-col ${col.tone}`}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={() => col.status && drop(col.status)}
+          >
+            <div className="col-head">
+              <span className="col-title">{col.title}</span>
+              <span className="col-count">{col.cards.length}</span>
             </div>
-          );
-        })}
+            <div className="col-cards">
+              {col.cards.map((card) => (
+                <CardTile
+                  key={card.id}
+                  card={card}
+                  selected={card.id === selectedCard}
+                  onSelect={() => onSelectCard(card.id === selectedCard ? null : card.id)}
+                  onDragStart={() => setDragId(card.id)}
+                />
+              ))}
+              <button className="add-card" onClick={() => setShowNew(true)}>
+                ＋ Add Card
+              </button>
+            </div>
+          </div>
+        ))}
       </div>
       {showNew && <NewCardModal onClose={() => setShowNew(false)} />}
     </div>
   );
+}
+
+interface ColumnDef {
+  key: string;
+  title: string;
+  tone: string;
+  /** Set when the column maps to a card status (enables drag-drop moves). */
+  status?: CardStatus;
+  cards: Card[];
+}
+
+function buildColumns(group: "status" | "assignee" | "tag", cards: Card[]): ColumnDef[] {
+  if (group === "status") {
+    return COLUMNS.map((c) => ({
+      key: c.status,
+      title: c.title,
+      tone: c.tone,
+      status: c.status,
+      cards: cards.filter((x) => x.status === c.status),
+    }));
+  }
+  const keyOf = (c: Card) =>
+    group === "assignee" ? (c.assignee ?? "unassigned") : (c.tags[0] ?? "untagged");
+  const keys = [...new Set(cards.map(keyOf))].sort();
+  return keys.map((k) => ({
+    key: k,
+    title: k,
+    tone: "tone-slate",
+    cards: cards.filter((c) => keyOf(c) === k),
+  }));
 }
 
 function CardTile({

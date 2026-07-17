@@ -1,13 +1,7 @@
 import { useSyncExternalStore } from "react";
-import type { AgentEvent, AgentSnapshot, BoardMessage, Card, ServerMessage } from "@aura/core";
+import type { ActionRequest, AgentEvent, AgentSnapshot, BoardMessage, Card, ServerMessage } from "@aura/core";
 
-/** Pending guardrail approval as broadcast by the daemon. */
-export interface PendingApproval {
-  id: string;
-  agentId?: string;
-  summary?: string;
-  [k: string]: unknown;
-}
+export type PendingApproval = ActionRequest;
 
 export interface Peer {
   id: string;
@@ -27,6 +21,8 @@ export interface ShellState {
   /** session id -> output lines (capped) */
   sessionOutput: Record<string, string[]>;
   cards: Card[];
+  /** Synthetic per-card activity derived from live card.upsert diffs. */
+  cardActivity: Record<string, { ts: number; text: string }[]>;
 }
 
 const EVENT_CAP = 2000;
@@ -41,7 +37,31 @@ let state: ShellState = {
   peers: [],
   sessionOutput: {},
   cards: [],
+  cardActivity: {},
 };
+
+const STATUS_LABEL: Record<string, string> = {
+  backlog: "To Do",
+  in_progress: "In Progress",
+  review: "In Review",
+  done: "Done",
+};
+
+function recordCardActivity(prev: Card | undefined, next: Card) {
+  const notes: string[] = [];
+  if (prev && prev.status !== next.status) {
+    notes.push(`moved from ${STATUS_LABEL[prev.status] ?? prev.status} to ${STATUS_LABEL[next.status] ?? next.status}`);
+  }
+  if (prev && prev.assignee !== next.assignee && next.assignee) {
+    notes.push(`assigned to ${next.assignee}`);
+  }
+  if (!prev) notes.push("card created");
+  if (!notes.length) return;
+  const list = [...(state.cardActivity[next.id] ?? [])];
+  for (const text of notes) list.push({ ts: Date.now(), text });
+  if (list.length > 20) list.splice(0, list.length - 20);
+  state = { ...state, cardActivity: { ...state.cardActivity, [next.id]: list } };
+}
 
 /** Seed cards from the REST fetch; WS keeps them fresh afterwards. */
 export function setCards(cards: Card[]) {
@@ -62,16 +82,19 @@ function upsertAgent(agent: AgentSnapshot) {
 
 function handleMessage(msg: ServerMessage | BoardMessage) {
   switch (msg.kind) {
-    case "card.upsert":
+    case "card.upsert": {
+      const prev = state.cards.find((c) => c.id === msg.card.id);
+      recordCardActivity(prev, msg.card);
       emit({ cards: [...state.cards.filter((c) => c.id !== msg.card.id), msg.card] });
       break;
+    }
     case "card.removed":
       emit({ cards: state.cards.filter((c) => c.id !== msg.id) });
       break;
     case "hello":
       emit({
         agents: [...msg.agents].sort((a, b) => a.agentId.localeCompare(b.agentId)),
-        approvals: msg.approvals as unknown as PendingApproval[],
+        approvals: msg.approvals,
         serverVersion: msg.serverVersion,
       });
       break;
@@ -88,7 +111,7 @@ function handleMessage(msg: ServerMessage | BoardMessage) {
       emit({ agents: state.agents.filter((a) => a.agentId !== msg.agentId) });
       break;
     case "approval.pending":
-      emit({ approvals: [...state.approvals.filter((a) => a.id !== (msg.request as { id: string }).id), msg.request as unknown as PendingApproval] });
+      emit({ approvals: [...state.approvals.filter((a) => a.id !== msg.request.id), msg.request] });
       break;
     case "approval.resolved":
       emit({ approvals: state.approvals.filter((a) => a.id !== msg.id) });
@@ -115,6 +138,13 @@ export function startWs() {
   if (started) return;
   started = true;
   connect();
+  // Seed the board once at boot; WS card.upsert keeps it fresh afterwards.
+  fetch("/api/board/cards")
+    .then((r) => r.json())
+    .then((d: { cards: Card[] }) => {
+      if (state.cards.length === 0) emit({ cards: d.cards });
+    })
+    .catch(() => {});
 }
 
 function connect() {
