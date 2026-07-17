@@ -16,8 +16,17 @@
   #canvas { display:block; width:100%; height:100%; cursor:grab; }
   aside { border-left:1px solid var(--line); overflow-y:auto; padding:12px; }
   aside h2 { margin:0 0 8px; font-size:13px; letter-spacing:.08em; color:var(--dim); text-transform:uppercase; }
-  #note { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:16px; min-height:120px; white-space:pre-wrap; word-break:break-word; }
+  #note { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:8px; min-height:120px; white-space:pre-wrap; word-break:break-word; }
   #note .hint { color:var(--dim); }
+  textarea { width:100%; box-sizing:border-box; background:var(--card); border:1px solid var(--line); border-radius:8px; color:var(--tx); padding:8px 10px; font:12px/1.5 ui-monospace, monospace; min-height:160px; resize:vertical; }
+  .btnrow { display:flex; gap:8px; margin:8px 0 16px; }
+  button { border:0; border-radius:8px; padding:6px 12px; font:inherit; font-weight:600; cursor:pointer; background:#2563eb; color:#fff; }
+  button.ghost { background:#242c37; color:var(--tx); }
+  button.danger { background:#7f1d1d; color:#fecaca; }
+  input[type=text] { background:var(--card); border:1px solid var(--line); border-radius:8px; color:var(--tx); padding:6px 10px; font:inherit; }
+  .msg { font-size:11px; min-height:1.4em; color:var(--dim); }
+  .msg.err { color:#ff7b8a; }
+  .msg.ok { color:#5ee0a0; }
   .skill { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:8px 12px; margin-bottom:8px; }
   .skill b { color:var(--accent); }
   .skill .meta { color:var(--dim); font-size:11px; }
@@ -34,16 +43,34 @@
   <canvas id="canvas"></canvas>
   <aside>
     <h2>Note</h2>
-    <div id="note"><span class="hint">click a node to preview</span></div>
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <input type="text" id="note-slug" placeholder="slug (e.g. projects/idea)" style="flex:1" />
+      <button class="ghost" id="note-new">new</button>
+    </div>
+    <textarea id="note-edit" placeholder="click a node or type a slug, then write markdown…"></textarea>
+    <div class="btnrow"><button id="note-save">save note</button><span class="msg" id="note-msg"></span></div>
     <h2>Skills</h2>
     <div id="skills"><span class="hint">loading…</span></div>
+    <div style="display:flex;gap:8px;margin:8px 0">
+      <input type="text" id="skill-name" placeholder="skill name (kebab-case)" style="flex:1" />
+      <button class="ghost" id="skill-load">load</button>
+    </div>
+    <textarea id="skill-edit" placeholder="---&#10;name: my-skill&#10;description: what it does&#10;---&#10;&#10;# my-skill&#10;## Steps"></textarea>
+    <div class="btnrow">
+      <button id="skill-save">save skill</button>
+      <button class="danger" id="skill-delete">delete</button>
+      <span class="msg" id="skill-msg"></span>
+    </div>
   </aside>
 </main>
 <script>
   const canvas = document.getElementById("canvas");
   const ctx = canvas.getContext("2d");
-  const noteEl = document.getElementById("note");
   const statsEl = document.getElementById("stats");
+  const noteSlug = document.getElementById("note-slug");
+  const noteEdit = document.getElementById("note-edit");
+  const noteMsg = document.getElementById("note-msg");
+  const say = (el, text, cls) => { el.textContent = text; el.className = "msg " + (cls || ""); };
 
   let nodes = [], edges = [], selected = null;
   let dragNode = null, panning = false, px = 0, py = 0;
@@ -183,12 +210,29 @@
 
   async function select(n) {
     selected = n;
-    noteEl.textContent = "loading…";
+    noteSlug.value = n.id;
+    say(noteMsg, "loading…");
     const res = await fetch(`/api/vault/note?slug=${encodeURIComponent(n.id)}`);
-    if (!res.ok) { noteEl.textContent = "(not found)"; return; }
+    if (!res.ok) { say(noteMsg, "not found", "err"); noteEdit.value = ""; return; }
     const { body } = await res.json();
-    noteEl.textContent = body;
+    noteEdit.value = body;
+    say(noteMsg, "");
   }
+
+  document.getElementById("note-new").addEventListener("click", () => {
+    selected = null; noteSlug.value = ""; noteEdit.value = ""; noteSlug.focus();
+  });
+  document.getElementById("note-save").addEventListener("click", async () => {
+    const slug = noteSlug.value.trim();
+    if (!slug) return say(noteMsg, "slug required", "err");
+    const res = await fetch("/api/vault/note", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ slug, body: noteEdit.value }),
+    });
+    if (!res.ok) return say(noteMsg, (await res.json()).error ?? "failed", "err");
+    say(noteMsg, "saved", "ok");
+    load();
+  });
 
   async function loadSkills() {
     const el = document.getElementById("skills");
@@ -202,12 +246,48 @@
     for (const s of skills) {
       const div = document.createElement("div");
       div.className = "skill";
+      div.style.cursor = "pointer";
       div.innerHTML = `<b>${esc(s.meta.name)}</b> <span class="meta">v${esc(s.meta.version)}</span>
         <div class="meta">${esc(s.meta.description)}</div>
         <div>${s.meta.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div>`;
+      div.addEventListener("click", () => loadSkill(s.meta.name));
       el.appendChild(div);
     }
   }
+
+  const skillName = document.getElementById("skill-name");
+  const skillEdit = document.getElementById("skill-edit");
+  const skillMsg = document.getElementById("skill-msg");
+  async function loadSkill(name) {
+    skillName.value = name;
+    const res = await fetch(`/api/skills/${encodeURIComponent(name)}`);
+    if (!res.ok) return say(skillMsg, "not found", "err");
+    skillEdit.value = (await res.json()).body;
+    say(skillMsg, "");
+  }
+  document.getElementById("skill-load").addEventListener("click", () => {
+    if (skillName.value.trim()) loadSkill(skillName.value.trim());
+  });
+  document.getElementById("skill-save").addEventListener("click", async () => {
+    const name = skillName.value.trim();
+    if (!name) return say(skillMsg, "name required", "err");
+    const res = await fetch(`/api/skills/${encodeURIComponent(name)}`, {
+      method: "PUT", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ body: skillEdit.value }),
+    });
+    if (!res.ok) return say(skillMsg, (await res.json()).error ?? "failed", "err");
+    say(skillMsg, "saved", "ok");
+    loadSkills();
+  });
+  document.getElementById("skill-delete").addEventListener("click", async () => {
+    const name = skillName.value.trim();
+    if (!name) return say(skillMsg, "name required", "err");
+    if (!confirm(`Delete skill "${name}"?`)) return;
+    const res = await fetch(`/api/skills/${encodeURIComponent(name)}`, { method: "DELETE" });
+    if (!res.ok) return say(skillMsg, (await res.json()).error ?? "failed", "err");
+    skillEdit.value = ""; say(skillMsg, "deleted", "ok");
+    loadSkills();
+  });
 
   function connect() {
     const ws = new WebSocket(`ws://${location.host}/ws`);
