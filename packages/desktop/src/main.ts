@@ -22,9 +22,19 @@ let store: TokenStore;
 async function startDaemon(): Promise<void> {
   const dataDir = path.join(app.getPath("userData"), "aura");
   fs.mkdirSync(dataDir, { recursive: true });
-  const require = createRequire(import.meta.url);
-  // dist/index.js → sibling cli.js
-  const cliPath = path.join(path.dirname(require.resolve("@aura/daemon")), "cli.js");
+  // Packaged builds carry a bundled daemon in resources/; dev resolves the
+  // workspace package. Both are driven by the system `node` (ABI, see above).
+  let cliPath: string;
+  let publicDir: string | undefined;
+  const bundled = path.join(process.resourcesPath ?? "", "daemon", "cli.cjs");
+  if (app.isPackaged && fs.existsSync(bundled)) {
+    cliPath = bundled;
+    publicDir = path.join(path.dirname(bundled), "public");
+  } else {
+    const require = createRequire(import.meta.url);
+    // dist/index.js → sibling cli.js
+    cliPath = path.join(path.dirname(require.resolve("@aura/daemon")), "cli.js");
+  }
   const child: ChildProcess = spawn(process.env["AURA_NODE"] ?? "node", [cliPath], {
     cwd: dataDir,
     shell: process.platform === "win32", // resolve node from PATH
@@ -35,6 +45,7 @@ async function startDaemon(): Promise<void> {
       AURA_DB: path.join(dataDir, "aura.db"),
       AURA_VAULT: process.env["AURA_VAULT"] ?? path.join(dataDir, "vault"),
       AURA_SKILLS: process.env["AURA_SKILLS"] ?? path.join(dataDir, "skills"),
+      ...(publicDir ? { AURA_PUBLIC: publicDir } : {}),
     },
   });
   child.stderr?.on("data", (d: Buffer) => console.error(`[daemon] ${d}`));

@@ -38,6 +38,22 @@ Guardrails: put a `permissions.yaml` next to the daemon working dir (see repo ro
 `deny` blocks the tool call; `ask` parks it as a pending Action Request (`GET /api/approvals`,
 `POST /api/approvals/:id {"approved":true}`).
 
+## Desktop app
+
+```sh
+pnpm --filter @aura/desktop start   # dev shell (daemon from workspace)
+pnpm --filter @aura/desktop dist    # packaged build → dist-app/win-unpacked/AURA.exe
+```
+
+The shell spawns the daemon via the system `node` (native modules are built
+for the Node ABI, not Electron's), so Node ≥ 20 must be on PATH. Packaged
+builds carry an esbuild-bundled daemon + UI in `resources/daemon`. The GitHub
+token is stored encrypted via OS keychain (`safeStorage`); link it from
+Sync → GitHub Sync….
+
+If packaging fails with a locked `app.asar`, point the output elsewhere:
+`electron-builder --win --dir --config.directories.output=%TEMP%\aura-dist`.
+
 ## Test
 
 ```sh

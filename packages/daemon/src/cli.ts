@@ -11,7 +11,8 @@ const HOST = "127.0.0.1"; // local-only by design; never bind 0.0.0.0
 
 const daemonOptions: Parameters<typeof createDaemon>[0] = {
   dbPath: process.env["AURA_DB"] ?? path.join(process.cwd(), "aura.db"),
-  publicDir: defaultPublicDir(),
+  // AURA_PUBLIC lets a bundled build point at its copied public dir.
+  publicDir: process.env["AURA_PUBLIC"] ?? defaultPublicDir(),
 };
 if (process.env["AURA_VAULT"]) daemonOptions.vaultDir = process.env["AURA_VAULT"];
 if (process.env["AURA_SKILLS"]) daemonOptions.skillsDir = process.env["AURA_SKILLS"];
