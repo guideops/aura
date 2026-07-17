@@ -448,7 +448,7 @@ function slotFor(a, entry) {
       if (SLOTS.council.length) return SLOTS.council[(councilCursor++) % SLOTS.council.length];
       return SLOTS.lounge[(loungeCursor++) % SLOTS.lounge.length];
     case "idle": case "success": return SLOTS.lounge[(loungeCursor++) % SLOTS.lounge.length];
-    case "offline": return [entry.group.position.x, -1.6, entry.group.position.z];
+    case "offline": return [entry.group.position.x, 0, entry.group.position.z];
     default: return SLOTS.idleWander[Math.floor(Math.random()*SLOTS.idleWander.length)];
   }
 }
@@ -511,6 +511,8 @@ function ensureAgent(a) {
   }
   const prevStatus = entry.data?.status;
   entry.data = a;
+  // Offline agents leave the floor entirely instead of sinking through it.
+  entry.group.visible = a.status !== "offline";
   entry.target.fromArray(slotFor(a, entry));
   if (a.status === "success" && prevStatus !== "success" && entry.actions.wave) {
     entry.actions.wave.reset().play();

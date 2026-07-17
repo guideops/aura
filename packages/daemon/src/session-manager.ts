@@ -109,8 +109,12 @@ export class SessionManager {
       startedAt: Date.now(),
     };
 
+    // Prompt travels over STDIN, never argv: shell:true concatenates args
+    // without quoting on Windows, which silently destroys multi-word prompts.
+    const quote = (s: string) => (s.includes(" ") ? `"${s}"` : s);
+    const usingStdin = !this.options.rawArgs;
     const args = this.options.rawArgs ?? (() => {
-      const a = ["-p", fullPrompt, "--settings", this.ensureSettingsFile()];
+      const a = ["-p", "--settings", quote(this.ensureSettingsFile())];
       if (input.model) a.push("--model", input.model);
       return a;
     })();
@@ -119,9 +123,13 @@ export class SessionManager {
     const child = spawn(this.options.command ?? "claude", args, {
       cwd: input.cwd,
       shell: true,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [usingStdin ? "pipe" : "ignore", "pipe", "pipe"],
       env: { ...process.env },
     });
+    if (usingStdin) {
+      child.stdin?.write(fullPrompt);
+      child.stdin?.end();
+    }
     session.pid = child.pid ?? null;
     child.stdout?.on("data", (d: Buffer) => this.capture(id, "stdout", d));
     child.stderr?.on("data", (d: Buffer) => this.capture(id, "stderr", d));
