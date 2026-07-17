@@ -97,6 +97,21 @@
       <iframe id="view-cad" class="view" data-src="/office.html?embed=1&cad=1" title="Space CAD"></iframe>
       <section id="view-sessions" class="view pane">
         <h2>Executions</h2>
+        <div id="spawn-form" class="spawn-form">
+          <div class="spawn-row">
+            <select id="spawn-provider">
+              <option value="claude-code">claude-code</option>
+              <option value="hermes">hermes</option>
+            </select>
+            <input id="spawn-model" placeholder="model (optional)" />
+            <input id="spawn-cwd" placeholder="working directory (claude only)" />
+          </div>
+          <div class="spawn-row">
+            <input id="spawn-prompt" placeholder="prompt…" />
+            <button id="spawn-go" class="btn primary">Spawn</button>
+          </div>
+          <div id="spawn-hint" class="sub"></div>
+        </div>
         <div id="sessions-list" class="cardlist"></div>
       </section>
       <section id="view-source" class="view pane">

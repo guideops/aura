@@ -14,6 +14,8 @@ import { GuardrailEngine } from "./guardrails.js";
 import { SessionManager, type EquippedSkill, type SessionManagerOptions } from "./session-manager.js";
 import { SpaceStore } from "./space-store.js";
 import { SpaceFile } from "@aura/core";
+import { HermesSessionManager } from "./hermes-sessions.js";
+import { HermesClient } from "@aura/adapter-hermes";
 import { Vault } from "./vault.js";
 import { writeBrief } from "./brief.js";
 import { Board } from "./board.js";
@@ -37,6 +39,8 @@ export interface DaemonOptions {
   spaceFile?: string;
   /** Test seam: spawn command/args overrides for SessionManager. */
   sessionManagerOptions?: Pick<SessionManagerOptions, "command" | "rawArgs">;
+  /** Test seam: injected Hermes client; defaults from AURA_HERMES_URL/KEY env. */
+  hermesClient?: HermesClient | null;
 }
 
 export interface Daemon {
@@ -297,10 +301,32 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
       onStatus: (sessionId, status) => broadcast({ kind: "session.status", sessionId, status }),
     },
   );
-  app.get("/api/sessions", async () => ({ sessions: sessions.list() }));
+  // Hermes provider: API-backed sessions sharing the terminal pipeline.
+  const hermesClient = options.hermesClient !== undefined
+    ? options.hermesClient
+    : (process.env["AURA_HERMES_KEY"]
+        ? new HermesClient({
+            baseUrl: process.env["AURA_HERMES_URL"] ?? "https://inference-api.nousresearch.com/v1",
+            apiKey: process.env["AURA_HERMES_KEY"],
+            ...(process.env["AURA_HERMES_MODEL"] ? { model: process.env["AURA_HERMES_MODEL"] } : {}),
+          })
+        : null);
+  const hermes = new HermesSessionManager(hermesClient, {
+    onOutput: (chunk) => broadcast({ kind: "session.output", ...chunk }),
+    onStatus: (sessionId, status) => broadcast({ kind: "session.status", sessionId, status }),
+    emit: (event) => bus.emit(event),
+  });
+  app.get("/api/hermes/status", async () => ({ enabled: hermes.enabled }));
+
+  app.get("/api/sessions", async () => ({
+    sessions: [
+      ...sessions.list().map((s) => ({ ...s, provider: "claude-code" })),
+      ...hermes.list().map((s) => ({ ...s, provider: "hermes" })),
+    ],
+  }));
   app.get("/api/sessions/:id/output", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const lines = sessions.output(id);
+    const lines = sessions.output(id) ?? hermes.output(id);
     if (lines === null) return reply.code(404).send({ error: "unknown session" });
     return { lines };
   });
@@ -313,7 +339,19 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     });
 
   app.post("/api/sessions", async (req, reply) => {
-    const body = (req.body ?? {}) as { cwd?: string; prompt?: string; model?: string; skills?: string[] };
+    const body = (req.body ?? {}) as {
+      cwd?: string; prompt?: string; model?: string; skills?: string[]; provider?: string; system?: string;
+    };
+    if (body.provider === "hermes") {
+      if (!body.prompt) return reply.code(400).send({ error: "prompt required" });
+      if (!hermes.enabled) {
+        return reply.code(409).send({ error: "hermes not configured — set AURA_HERMES_KEY" });
+      }
+      const input: { prompt: string; model?: string; system?: string } = { prompt: body.prompt };
+      if (body.model) input.model = body.model;
+      if (body.system) input.system = body.system;
+      return reply.send({ session: { ...hermes.spawn(input), provider: "hermes" } });
+    }
     if (!body.cwd || !body.prompt) {
       return reply.code(400).send({ error: "cwd and prompt required" });
     }

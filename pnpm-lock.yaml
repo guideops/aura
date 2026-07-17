@@ -43,6 +43,22 @@ importers:
         specifier: ^3.2.0
         version: 3.2.6(@types/debug@4.1.13)(@types/node@22.20.0)(yaml@2.9.0)
 
+  packages/adapters/hermes:
+    dependencies:
+      '@aura/core':
+        specifier: workspace:*
+        version: link:../../core
+    devDependencies:
+      '@types/node':
+        specifier: ^22.13.0
+        version: 22.20.0
+      typescript:
+        specifier: ^5.8.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.6(@types/debug@4.1.13)(@types/node@22.20.0)(yaml@2.9.0)
+
   packages/core:
     dependencies:
       zod:
@@ -61,6 +77,9 @@ importers:
       '@aura/adapter-claude-code':
         specifier: workspace:*
         version: link:../adapters/claude-code
+      '@aura/adapter-hermes':
+        specifier: workspace:*
+        version: link:../adapters/hermes
       '@aura/core':
         specifier: workspace:*
         version: link:../core

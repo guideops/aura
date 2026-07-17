@@ -217,13 +217,27 @@ async function loadSessions() {
   const { sessions } = await fetch("/api/sessions").then((r) => r.json());
   const host = $("#sessions-list");
   host.innerHTML = "";
-  if (!sessions.length) host.appendChild(el("div", "sub", "No sessions. Assign a board card to spawn one."));
+  const hs = await fetch("/api/hermes/status").then((r) => r.json()).catch(() => ({ enabled: false }));
+  $("#spawn-hint").textContent = hs.enabled
+    ? "Hermes linked — API-backed runs available."
+    : "Hermes not configured: set AURA_HERMES_KEY (and optionally AURA_HERMES_URL / AURA_HERMES_MODEL) before starting the daemon.";
+  if (!sessions.length) host.appendChild(el("div", "sub", "No sessions yet. Spawn one above or assign a board card."));
   for (const s of sessions) {
     const item = el("div", "item");
     const left = el("div");
-    left.appendChild(el("div", "", `${s.id.slice(0, 8)} — ${s.status}`));
-    left.appendChild(el("div", "sub", `${s.cwd ?? ""} ${s.model ?? ""}`));
+    const head = el("div");
+    head.appendChild(el("span", "", `${s.id.slice(0, 8)} — ${s.status} `));
+    head.appendChild(el("span", `prov-badge${s.provider === "hermes" ? " hermes" : ""}`, s.provider ?? "claude-code"));
+    left.appendChild(head);
+    left.appendChild(el("div", "sub", `${(s.prompt ?? "").slice(0, 70)}`));
     item.appendChild(left);
+    const term = el("button", "btn", "Terminal");
+    term.onclick = () => {
+      selectDockTab("terminal");
+      $("#dock-session-select").value = s.id;
+      loadTerminal(s.id);
+    };
+    item.appendChild(term);
     if (s.status === "running") {
       const stop = el("button", "btn", "Stop");
       stop.onclick = async () => {
@@ -252,6 +266,37 @@ async function loadGithub() {
     host.appendChild(item);
   }
 }
+$("#spawn-provider").onchange = () => {
+  $("#spawn-cwd").disabled = $("#spawn-provider").value === "hermes";
+};
+$("#spawn-go").onclick = async () => {
+  const provider = $("#spawn-provider").value;
+  const prompt = $("#spawn-prompt").value.trim();
+  if (!prompt) return toast("prompt required");
+  const body = { provider, prompt };
+  const model = $("#spawn-model").value.trim();
+  if (model) body.model = model;
+  if (provider !== "hermes") {
+    const cwd = $("#spawn-cwd").value.trim();
+    if (!cwd) return toast("cwd required for claude-code sessions");
+    body.cwd = cwd;
+  }
+  const res = await fetch("/api/sessions", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) return toast(`spawn failed: ${(await res.json()).error}`);
+  const { session } = await res.json();
+  toast(`spawned ${session.id.slice(0, 8)} (${provider})`);
+  $("#spawn-prompt").value = "";
+  loadSessions();
+  loadSessionsTree();
+  selectDockTab("terminal");
+  await refreshTerminalSessions();
+  $("#dock-session-select").value = session.id;
+  loadTerminal(session.id);
+};
+
 $("#gh-sync").onclick = async () => {
   const r = await fetch("/api/github/sync", { method: "POST" });
   toast(r.ok ? "sync complete" : `sync failed: ${(await r.json()).error}`);
