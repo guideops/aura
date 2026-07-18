@@ -28,6 +28,28 @@
   .ar button { flex:1; border:0; border-radius:7px; padding:6px 0; font-weight:600; cursor:pointer; font-size:12px; }
   .ar .approve { background:#16a34a; color:#fff; }
   .ar .deny { background:#e5e7eb; color:#374151; }
+
+  /* ---- dark theme (synced with the shell via localStorage "aura-theme") ---- */
+  body.dark { color-scheme: dark; background:#0b0d12; }
+  body.dark #hud, body.dark #panel { background:#12151ce6; border-color:#262c37; color:#e6eaf2; }
+  body.dark #hud .dim, body.dark #panel .row span:first-child { color:#98a2b3; }
+  body.dark #panel .row { color:#c4ccd9; }
+  body.dark .ar { background:#1d1910; border-color:#4a3b18; }
+  body.dark .ar .tool { color:#c4ccd9; }
+  body.dark .ar .reason { color:#98a2b3; }
+  body.dark .ar .deny { background:#262c37; color:#c4ccd9; }
+  body.dark #cadbar, body.dark #cad-inspector {
+    background:#12151c; border-color:#262c37; box-shadow:0 8px 24px rgba(0,0,0,.5); color:#e6eaf2; }
+  body.dark #cadbar .cad-head b { color:#e6eaf2; }
+  body.dark #cadbar .hint { color:#98a2b3; }
+  body.dark #cadbar kbd { background:#1a1e27; border-color:#333c4a; color:#c4ccd9; }
+  body.dark #cadbar button, body.dark #cadbar select { background:#1a1e27; border-color:#333c4a; color:#e6eaf2; }
+  body.dark #cadbar button:hover { background:#262c37; }
+  body.dark #cadbar #cad-save { background:#3b82f6; border-color:#3b82f6; color:#fff; }
+  body.dark #cad-inspector h4 { color:#e6eaf2; }
+  body.dark #cad-inspector label { color:#98a2b3; }
+  body.dark #cad-inspector input, body.dark #cad-inspector select {
+    background:#1a1e27; border-color:#333c4a; color:#e6eaf2; }
 </style>
 </head>
 <body>
@@ -90,7 +112,8 @@ function applyCamera() {
 }
 let orbiting = null; // { startX, startAz }
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0xd8dee7, 0.9));
+const hemi = new THREE.HemisphereLight(0xffffff, 0xd8dee7, 0.9);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffffff, 1.35);
 sun.position.set(8, 14, 6);
 sun.castShadow = true;
@@ -119,6 +142,22 @@ scene.add(annexGrid);
 const divider = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.0, 5.6), M(GLASS_C, { transparent: true, opacity: 0.4, roughness: 0.1 }));
 divider.position.set(5.9, 0.5, 1.0);
 scene.add(divider);
+
+// ---------- theme (follows the shell's toggle via localStorage) ----------
+function applyTheme(dark) {
+  document.body.classList.toggle("dark", dark);
+  scene.background.setHex(dark ? 0x10141b : 0xeef1f5);
+  for (const g of [grid, annexGrid]) {
+    g.material.transparent = true;
+    g.material.opacity = dark ? 0.22 : 1;
+  }
+  hemi.groundColor.setHex(dark ? 0x3a4250 : 0xd8dee7);
+  hemi.intensity = dark ? 0.65 : 0.9;
+  sun.intensity = dark ? 1.05 : 1.35;
+}
+const themeDark = () => localStorage.getItem("aura-theme") === "dark";
+applyTheme(themeDark());
+addEventListener("storage", (e) => { if (e.key === "aura-theme") applyTheme(themeDark()); });
 
 function makeLabel(text, w = 2.6) {
   const c = document.createElement("canvas");

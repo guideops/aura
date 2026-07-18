@@ -6,6 +6,12 @@
       "runtimeExecutable": "node",
       "runtimeArgs": ["packages/daemon/dist/cli.js"],
       "port": 8311
+    },
+    {
+      "name": "aura-shell",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@aura/shell", "dev"],
+      "port": 5183
     }
   ]
 }

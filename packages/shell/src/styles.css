@@ -581,3 +581,43 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 .wb-activity-row .avatar-dot { flex-shrink: 0; align-self: center; }
 .wb-activity-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-activity-ts { color: var(--text-faint); font-size: 10px; flex-shrink: 0; }
+
+/* ---------- Dark theme ---------- */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b0d12;
+  --bg-panel: #12151c;
+  --bg-inset: #1a1e27;
+  --border: #262c37;
+  --text: #e6eaf2;
+  --text-dim: #98a2b3;
+  --text-faint: #64707f;
+  --accent: #3b82f6;
+  --accent-soft: rgba(59, 130, 246, 0.16);
+  --green: #4ade80;
+  --amber: #fbbf24;
+  --red: #f87171;
+}
+
+/* Recolor the pastel chips that hardcode light-mode hex values. */
+[data-theme="dark"] .tab-live,
+[data-theme="dark"] .conn-state.on,
+[data-theme="dark"] .ar-step.done,
+[data-theme="dark"] .impact-low { background: rgba(74, 222, 128, 0.14); }
+[data-theme="dark"] .badge-review,
+[data-theme="dark"] .impact-medium { background: rgba(251, 191, 36, 0.14); }
+[data-theme="dark"] .status-chip.status-blocked,
+[data-theme="dark"] .impact-high { background: rgba(248, 113, 113, 0.14); }
+[data-theme="dark"] .tag-backend { background: rgba(59, 130, 246, 0.16); color: #93c5fd; }
+[data-theme="dark"] .tag-frontend { background: rgba(74, 222, 128, 0.14); color: #86efac; }
+[data-theme="dark"] .tag-ai { background: rgba(168, 85, 247, 0.16); color: #d8b4fe; }
+[data-theme="dark"] .tag-security { background: rgba(248, 113, 113, 0.14); color: #fca5a5; }
+[data-theme="dark"] .tag-infra,
+[data-theme="dark"] .tag-integration { background: rgba(251, 191, 36, 0.14); color: #fcd34d; }
+[data-theme="dark"] .modal-backdrop { background: rgba(0, 0, 0, 0.55); }
+[data-theme="dark"] .modal,
+[data-theme="dark"] .palette { box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6); }
+[data-theme="dark"] .wb-frame { border-color: #3a4656; background: rgba(59, 130, 246, 0.06); }
+[data-theme="dark"] .wb-handle { border-color: var(--bg-panel) !important; }
+[data-theme="dark"] .wb-note { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
+[data-theme="dark"] .wb-comment { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4); }

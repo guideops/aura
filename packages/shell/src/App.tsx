@@ -27,6 +27,20 @@ export function App() {
   const rightPanel = useRef<ImperativePanelHandle>(null);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
+  const [theme, setTheme] = useState<"light" | "dark">(() =>
+    localStorage.getItem("aura-theme") === "dark" ? "dark" : "light",
+  );
+
+  // Writing localStorage also fires "storage" in the same-origin office
+  // iframes, which restyle their 3D scene to match.
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("aura-theme", theme);
+  }, [theme]);
+  const toggleTheme = useCallback(
+    () => setTheme((t) => (t === "dark" ? "light" : "dark")),
+    [],
+  );
 
   const toggleLeft = useCallback(() => {
     const p = leftPanel.current;
@@ -92,6 +106,8 @@ export function App() {
         rightOpen={rightOpen}
         onToggleLeft={toggleLeft}
         onToggleRight={toggleRight}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
       <div className="shell-main">
         <ActivityBar view={view} onSelect={setView} onOpenTab={setTab} onOpenPalette={() => setPaletteOpen(true)} />
