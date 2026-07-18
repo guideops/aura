@@ -76,6 +76,20 @@ const camera = new THREE.OrthographicCamera(-D*aspect, D*aspect, D, -D, 0.1, 100
 camera.position.set(14.5, 12, 14.5);
 camera.lookAt(2.5, 0, 0);
 
+// ---------- orbit: swivel the iso view around the room ----------
+const CAM_TARGET = new THREE.Vector3(2.5, 0, 0);
+const CAM_RADIUS = Math.hypot(14.5 - CAM_TARGET.x, 14.5 - CAM_TARGET.z);
+let camAzimuth = Math.atan2(14.5 - CAM_TARGET.z, 14.5 - CAM_TARGET.x);
+function applyCamera() {
+  camera.position.set(
+    CAM_TARGET.x + CAM_RADIUS * Math.cos(camAzimuth),
+    camera.position.y,
+    CAM_TARGET.z + CAM_RADIUS * Math.sin(camAzimuth),
+  );
+  camera.lookAt(CAM_TARGET);
+}
+let orbiting = null; // { startX, startAz }
+
 scene.add(new THREE.HemisphereLight(0xffffff, 0xd8dee7, 0.9));
 const sun = new THREE.DirectionalLight(0xffffff, 1.35);
 sun.position.set(8, 14, 6);
@@ -364,14 +378,17 @@ async function buildOffice() {
 
 // Agent slots derive from the live layout: move a desk in Space CAD and
 // agents sit at its new position. Fallbacks match the shipped default layout.
-// A slot is { pos:[x,0,z], sit, yaw, seatY } — sit slots play the sitting
-// clip at seatY (chair height) facing yaw; standing slots just face yaw.
-const spot = (pos, opts = {}) => ({ pos, sit: false, yaw: null, seatY: 0, ...opts });
+// A slot is { pos:[x,0,z], sit, yaw, seatY, gestures } — sit slots play the
+// sitting clip at seatY (chair height) facing yaw; standing slots face yaw
+// and occasionally play a one-shot gesture from `gestures` (reach for a
+// book, nod at the kanban wall, present at the council screen…).
+const spot = (pos, opts = {}) => ({ pos, sit: false, yaw: null, seatY: 0, gestures: null, ...opts });
 const SLOTS = {
   desk: [[0,0,1.0],[2.9,0,-0.3],[-0.9,0,0.9],[3.7,0,-1.2],[0.9,0,1.3],[2.1,0,0.3]].map((p) => spot(p)),
   gate: [[3.8,0,1.8],[3.8,0,2.6]].map((p) => spot(p)),
   lounge: [[-1.4,0,3.3],[-2.3,0,3.5],[-1.0,0,4.0]].map((p) => spot(p)),
   council: [],
+  browse: [],
   idleWander: [[0.5,0,2.0],[-3.0,0,-1.5],[2.0,0,3.0],[-0.5,0,-2.5]].map((p) => spot(p)),
 };
 function buildSlots() {
@@ -392,7 +409,13 @@ function buildSlots() {
     ]);
   }
   const gate = ofKind("security-gate")[0];
-  if (gate) SLOTS.gate = [spot(world(gate, [-0.9, 0, 0])), spot(world(gate, [-0.9, 0, 0.8]))];
+  if (gate) {
+    // blocked agents wait at the gate and gesture "no" at it
+    SLOTS.gate = [
+      spot(world(gate, [-0.9, 0, 0]), { yaw: yawOf(gate, Math.PI / 2), gestures: ["No"] }),
+      spot(world(gate, [-0.9, 0, 0.8]), { yaw: yawOf(gate, Math.PI / 2), gestures: ["No", "Wave"] }),
+    ];
+  }
   const lounge = ofKind("lounge")[0];
   if (lounge) {
     SLOTS.lounge = [
@@ -405,14 +428,42 @@ function buildSlots() {
   }
   const council = ofKind("council")[0];
   if (council) {
-    SLOTS.council = [];
-    for (let i = 0; i < 8; i++) {
+    // First slot leads the meeting: standing at the screen, presenting.
+    // Remaining slots sit around the table (the chair at the screen side
+    // stays empty — the leader stands there).
+    SLOTS.council = [
+      spot(world(council, [2.45, 0, 0]), {
+        yaw: yawOf(council, -Math.PI / 2),
+        gestures: ["Yes", "Wave", "No", "ThumbsUp"],
+      }),
+    ];
+    for (let i = 1; i < 8; i++) {
       const a = (i / 8) * Math.PI * 2;
       SLOTS.council.push(spot(world(council, [Math.cos(a) * 2.05, 0, Math.sin(a) * 2.05]), {
         sit: true, seatY: 0.5,
         yaw: yawOf(council, Math.atan2(-Math.cos(a), -Math.sin(a))),
       }));
     }
+  }
+  // Browse spots: standing interaction points in front of boards and the
+  // skills shelf. Offsets face each model's drawn front (+z for the shelf
+  // and kanban wall, +x for the thin board panels).
+  const BROWSE = {
+    "skills-library": { off: [0, 0, 1.05], yaw: Math.PI, gestures: ["Punch"] },
+    "kanban-wall": { off: [0, 0, 0.95], yaw: Math.PI, gestures: ["Yes", "No", "ThumbsUp"] },
+    whiteboard: { off: [0.95, 0, 0], yaw: -Math.PI / 2, gestures: ["Yes", "ThumbsUp"] },
+    "design-board": { off: [0.95, 0, 0], yaw: -Math.PI / 2, gestures: ["Yes", "No"] },
+    "agenda-board": { off: [0.95, 0, 0], yaw: -Math.PI / 2, gestures: ["Yes", "ThumbsUp"] },
+  };
+  const browse = [];
+  for (const [kind, cfg] of Object.entries(BROWSE)) {
+    for (const e of ofKind(kind)) {
+      browse.push(spot(world(e, cfg.off), { yaw: yawOf(e, cfg.yaw), gestures: cfg.gestures }));
+    }
+  }
+  if (browse.length) {
+    SLOTS.browse = browse;
+    SLOTS.idleWander = browse; // unknown statuses wander to the boards too
   }
 }
 
@@ -482,20 +533,32 @@ function skeletonHeight(group) {
   return maxY > minY ? maxY - minY : 0;
 }
 
-let deskCursor = 0, gateCursor = 0, loungeCursor = 0, councilCursor = 0;
-function slotFor(a, entry) {
-  switch (a.status) {
+let deskCursor = 0, gateCursor = 0, loungeCursor = 0, councilCursor = 0, wanderCursor = 0;
+function pickSlot(status, entry) {
+  switch (status) {
     case "active": case "researching": case "reading":
-      entry.slot ??= SLOTS.desk[(deskCursor++) % SLOTS.desk.length];
-      return entry.slot;
+      return SLOTS.desk[(deskCursor++) % SLOTS.desk.length];
     case "blocked": return SLOTS.gate[(gateCursor++) % SLOTS.gate.length];
     case "review":
       if (SLOTS.council.length) return SLOTS.council[(councilCursor++) % SLOTS.council.length];
       return SLOTS.lounge[(loungeCursor++) % SLOTS.lounge.length];
-    case "idle": case "success": return SLOTS.lounge[(loungeCursor++) % SLOTS.lounge.length];
+    case "idle": case "success": {
+      // idle agents split between the lounge and browsing the boards/shelf
+      const pool = [...SLOTS.lounge, ...SLOTS.browse];
+      return pool[(loungeCursor++) % pool.length];
+    }
     case "offline": return spot([entry.group.position.x, 0, entry.group.position.z]);
-    default: return SLOTS.idleWander[Math.floor(Math.random()*SLOTS.idleWander.length)];
+    default: return SLOTS.idleWander[(wanderCursor++) % SLOTS.idleWander.length];
   }
+}
+// Slots are sticky per status: without this, every WS snapshot re-rolled the
+// cursor and agents endlessly shuffled between seats (stand up, walk, sit,
+// repeat). A new slot is only assigned when the agent's status changes.
+function slotFor(a, entry) {
+  if (entry.slot && entry.slotStatus === a.status) return entry.slot;
+  entry.slotStatus = a.status;
+  entry.slot = pickSlot(a.status, entry);
+  return entry.slot;
 }
 
 function ensureAgent(a) {
@@ -522,7 +585,25 @@ function ensureAgent(a) {
       if (idle) { actions.idle = mixer.clipAction(idle); }
       if (walk) { actions.walk = mixer.clipAction(walk); }
       if (wave) { actions.wave = mixer.clipAction(wave); actions.wave.loop = THREE.LoopOnce; }
-      if (sit && sit !== idle) { actions.sit = mixer.clipAction(sit); }
+      if (sit && sit !== idle) {
+        // Sit-down is a transition clip — looping it makes the agent bob up
+        // and down forever. Play once and hold the final (seated) pose.
+        actions.sit = mixer.clipAction(sit);
+        actions.sit.loop = THREE.LoopOnce;
+        actions.sit.clampWhenFinished = true;
+      }
+      // One-shot gesture clips for object interactions (grab book, nod at
+      // kanban, present at council…). Played over the base pose, they
+      // auto-release back to idle when finished.
+      actions.gesture = {};
+      for (const name of ["Yes", "No", "ThumbsUp", "Punch", "Wave"]) {
+        const clip = robotTemplate.clips.find((c) => c.name.endsWith("_" + name));
+        if (clip) {
+          const act = mixer.clipAction(clip);
+          act.loop = THREE.LoopOnce;
+          actions.gesture[name] = act;
+        }
+      }
       actions.idle?.play();
       // Normalize height from the SKELETON, not a bounding box. setFromObject on
       // a skinned mesh returns bind-pose geometry bounds (here ~150 units) while
@@ -666,7 +747,7 @@ if (CAD) {
   bar.id = "cadbar";
   const kinds = Object.keys(BUILDERS);
   bar.innerHTML = `<div class="cad-head"><b>SPACE CAD</b>
-      <span class="hint">click to select · drag to move · <kbd>R</kbd> rotate · <kbd>Del</kbd> delete · scroll to zoom</span>
+      <span class="hint">click to select · drag to move · <kbd>R</kbd> rotate · <kbd>Del</kbd> delete · scroll to zoom · right-drag to orbit</span>
       <span id="cad-state"></span></div>
     <div class="cad-controls"><select id="cad-kind">${kinds.map((k) => `<option>${k}</option>`).join("")}</select>
     <button id="cad-add">Add</button><button id="cad-dup">Duplicate</button><button id="cad-del">Delete</button>
@@ -683,10 +764,10 @@ if (CAD) {
   document.body.appendChild(inspector);
   const style = document.createElement("style");
   style.textContent = `#cadbar { position:fixed; top:12px; left:50%; transform:translateX(-50%);
-      display:flex; flex-direction:column; gap:9px; background:#fff; border:1px solid #dde3ea;
-      border-radius:12px; padding:12px 18px; box-shadow:0 8px 24px rgba(30,40,60,.12); z-index:10;
+      display:flex; flex-direction:column; gap:10px; background:#fff; border:1px solid #dde3ea;
+      border-radius:14px; padding:16px 28px; box-shadow:0 8px 24px rgba(30,40,60,.12); z-index:10;
       max-width:calc(100vw - 24px); box-sizing:border-box; }
-    #cadbar .cad-head { display:flex; align-items:baseline; gap:14px; white-space:nowrap; }
+    #cadbar .cad-head { display:flex; align-items:baseline; gap:16px; white-space:nowrap; padding-right:8px; }
     #cadbar .cad-head b { font-size:13px; letter-spacing:.1em; color:#1f2937; }
     #cadbar .hint { color:#55647a; font-size:12px; overflow:hidden; text-overflow:ellipsis; }
     #cadbar kbd { background:#eef1f5; border:1px solid #d5dce4; border-bottom-width:2px; border-radius:4px;
@@ -826,6 +907,11 @@ function setHover(entry) {
   renderer.domElement.style.cursor = entry ? "pointer" : "default";
 }
 addEventListener("pointermove", (e) => {
+  if (orbiting) {
+    camAzimuth = orbiting.startAz - (e.clientX - orbiting.startX) * 0.005;
+    applyCamera();
+    return;
+  }
   if (dragging) return;
   if (e.target !== renderer.domElement) { setHover(null); return; }
   castPointer(e);
@@ -833,9 +919,18 @@ addEventListener("pointermove", (e) => {
   const id = hits[0]?.object.userData.primId;
   setHover(id ? zoneObjects.get(id) ?? null : null);
 });
+addEventListener("pointerup", () => { orbiting = null; });
+addEventListener("contextmenu", (e) => {
+  if (e.target === renderer.domElement) e.preventDefault();
+});
 
 addEventListener("pointerdown", (e) => {
   if (e.target.closest?.("#cadbar, #cad-inspector")) return;
+  // Right or middle button always orbits (both modes).
+  if (e.button === 1 || e.button === 2) {
+    orbiting = { startX: e.clientX, startAz: camAzimuth };
+    return;
+  }
   castPointer(e);
   if (CAD) {
     const zoneHits = ray.intersectObjects(zonePickers, false);
@@ -877,7 +972,11 @@ addEventListener("pointerdown", (e) => {
       <div class="row"><span>CARD</span><span>${card ? `${card.key} · ${card.progress}%` : "—"}</span></div>
       <div class="row"><span>TOKENS</span><span>${tok}</span></div>
       <div class="row"><span>SESSION</span><span>${a.sessionId.slice(0,8)}</span></div>`;
-  } else panel.style.display = "none";
+  } else {
+    panel.style.display = "none";
+    // Left-drag on empty floor swivels the view.
+    orbiting = { startX: e.clientX, startAz: camAzimuth };
+  }
 });
 
 // ---------- approvals ----------
@@ -990,6 +1089,8 @@ function tick() {
       entry.group.rotation.y = Math.atan2(nx - p.x, nz - p.z);
       p.x = nx; p.z = nz;
       p.y += (0 - p.y) * Math.min(1, dt * 6);
+      entry.nextGesture = null;
+      if (entry.activeGesture) { entry.activeGesture.fadeOut(0.2); entry.activeGesture = null; }
       setMode(entry, "walk");
     } else {
       const seat = entry.seat;
@@ -1010,6 +1111,28 @@ function tick() {
         }
         p.y += (0 - p.y) * Math.min(1, dt * 6);
         setMode(entry, "idle");
+        // Settled at an interaction spot: every so often play a one-shot
+        // gesture (grab a book, nod at the board, present at the screen).
+        // Idle fades out for the gesture and back in when it ends.
+        const now = performance.now();
+        if (entry.activeGesture && now >= entry.gestureUntil) {
+          entry.activeGesture = null;
+          entry.actions.idle?.reset().fadeIn(0.2).play();
+        }
+        const g = entry.slot?.gestures;
+        if (g?.length && entry.actions.gesture && !entry.activeGesture) {
+          entry.nextGesture ??= now + 2000 + Math.random() * 6000;
+          if (now >= entry.nextGesture) {
+            entry.nextGesture = now + 6000 + Math.random() * 10000;
+            const act = entry.actions.gesture[g[Math.floor(Math.random() * g.length)]];
+            if (act) {
+              act.reset().fadeIn(0.15).play();
+              entry.actions.idle?.fadeOut(0.15);
+              entry.activeGesture = act;
+              entry.gestureUntil = now + act.getClip().duration * 1000 - 150;
+            }
+          }
+        }
       }
     }
     entry.mixer?.update(dt);
