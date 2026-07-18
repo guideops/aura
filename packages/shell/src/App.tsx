@@ -1,5 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Panel,
+  PanelGroup,
+  PanelResizeHandle,
+  type ImperativePanelHandle,
+} from "react-resizable-panels";
 import { TopBar } from "./components/TopBar";
 import { ActivityBar, type ActivityView } from "./components/ActivityBar";
 import { Explorer } from "./components/Explorer";
@@ -18,6 +23,19 @@ export function App() {
   const [selectedCard, setSelectedCard] = useState<string | null>(null);
   const [zone, setZone] = useState<ZoneContext | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const leftPanel = useRef<ImperativePanelHandle>(null);
+  const rightPanel = useRef<ImperativePanelHandle>(null);
+  const [leftOpen, setLeftOpen] = useState(true);
+  const [rightOpen, setRightOpen] = useState(true);
+
+  const toggleLeft = useCallback(() => {
+    const p = leftPanel.current;
+    if (p) p.isCollapsed() ? p.expand() : p.collapse();
+  }, []);
+  const toggleRight = useCallback(() => {
+    const p = rightPanel.current;
+    if (p) p.isCollapsed() ? p.expand() : p.collapse();
+  }, []);
 
   useEffect(() => startWs(), []);
 
@@ -33,17 +51,23 @@ export function App() {
     return () => window.removeEventListener("message", onMessage);
   }, []);
 
-  // Ctrl/Cmd+K opens the command palette anywhere.
+  // Ctrl/Cmd+K palette · Ctrl/Cmd+B sidebar · Ctrl/Cmd+Shift+B right rail.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      if (k === "k") {
         e.preventDefault();
         setPaletteOpen((o) => !o);
+      } else if (k === "b") {
+        e.preventDefault();
+        if (e.shiftKey) toggleRight();
+        else toggleLeft();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [toggleLeft, toggleRight]);
 
   const setBottomTab = useCallback((t: string) => {
     window.dispatchEvent(new CustomEvent("aura:bottom-tab", { detail: t }));
@@ -64,11 +88,22 @@ export function App() {
         onNewCard={newCard}
         onConnect={() => setView("connect")}
         onProblems={() => setBottomTab("problems")}
+        leftOpen={leftOpen}
+        rightOpen={rightOpen}
+        onToggleLeft={toggleLeft}
+        onToggleRight={toggleRight}
       />
       <div className="shell-main">
         <ActivityBar view={view} onSelect={setView} onOpenTab={setTab} onOpenPalette={() => setPaletteOpen(true)} />
         <PanelGroup direction="horizontal" className="shell-panels">
-          <Panel defaultSize={16} minSize={10} collapsible>
+          <Panel
+            ref={leftPanel}
+            defaultSize={16}
+            minSize={10}
+            collapsible
+            onCollapse={() => setLeftOpen(false)}
+            onExpand={() => setLeftOpen(true)}
+          >
             <Explorer view={view} onOpenTab={setTab} onSelectCard={setSelectedCard} />
           </Panel>
           <PanelResizeHandle className="rh rh-v" />
@@ -89,7 +124,14 @@ export function App() {
             </PanelGroup>
           </Panel>
           <PanelResizeHandle className="rh rh-v" />
-          <Panel defaultSize={22} minSize={14} collapsible>
+          <Panel
+            ref={rightPanel}
+            defaultSize={22}
+            minSize={14}
+            collapsible
+            onCollapse={() => setRightOpen(false)}
+            onExpand={() => setRightOpen(true)}
+          >
             <RightRail
               tab={tab}
               selectedCard={selectedCard}

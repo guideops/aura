@@ -1,16 +1,43 @@
 import { useState } from "react";
 import { api } from "../lib/api";
 
+function PanelToggleIcon({ side, on }: { side: "left" | "right"; on: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" />
+      <rect
+        x={side === "left" ? 2.5 : 8.5}
+        y="3.5"
+        width="5"
+        height="9"
+        rx="0.5"
+        fill={on ? "currentColor" : "none"}
+        opacity={on ? 0.5 : 0.25}
+        stroke="currentColor"
+        strokeWidth="0.75"
+      />
+    </svg>
+  );
+}
+
 export function TopBar({
   onOpenPalette,
   onNewCard,
   onConnect,
   onProblems,
+  leftOpen,
+  rightOpen,
+  onToggleLeft,
+  onToggleRight,
 }: {
   onOpenPalette: () => void;
   onNewCard: () => void;
   onConnect: () => void;
   onProblems: () => void;
+  leftOpen: boolean;
+  rightOpen: boolean;
+  onToggleLeft: () => void;
+  onToggleRight: () => void;
 }) {
   const [briefState, setBriefState] = useState<"idle" | "busy" | "done">("idle");
 
@@ -49,6 +76,21 @@ export function TopBar({
         </button>
         <button className="icon-btn" title="Connections" onClick={onConnect}>👤</button>
         <button className="icon-btn" title="Problems" onClick={onProblems}>🔔</button>
+        <span className="topbar-sep" />
+        <button
+          className={`icon-btn panel-toggle ${leftOpen ? "on" : ""}`}
+          title="Toggle sidebar (Ctrl+B)"
+          onClick={onToggleLeft}
+        >
+          <PanelToggleIcon side="left" on={leftOpen} />
+        </button>
+        <button
+          className={`icon-btn panel-toggle ${rightOpen ? "on" : ""}`}
+          title="Toggle right rail (Ctrl+Shift+B)"
+          onClick={onToggleRight}
+        >
+          <PanelToggleIcon side="right" on={rightOpen} />
+        </button>
       </div>
     </header>
   );

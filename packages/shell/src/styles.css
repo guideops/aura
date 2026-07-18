@@ -70,9 +70,12 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
   color: var(--text-faint); font-size: 10px; font-family: var(--mono);
   border: 1px solid var(--border); border-radius: 4px; padding: 0 5px;
 }
-.topbar-right { display: flex; gap: 4px; }
+.topbar-right { display: flex; gap: 4px; align-items: center; }
 .icon-btn { padding: 4px 8px; border-radius: 6px; color: var(--text-dim); }
 .icon-btn:hover { background: var(--bg-inset); }
+.icon-btn svg { display: block; }
+.topbar-sep { width: 1px; height: 16px; background: var(--border); margin: 0 4px; }
+.panel-toggle.on { color: var(--text); }
 
 /* ---------- Activity bar ---------- */
 .activity-bar {

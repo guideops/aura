@@ -109,13 +109,13 @@ scene.add(divider);
 function makeLabel(text, w = 2.6) {
   const c = document.createElement("canvas");
   const x = c.getContext("2d");
-  c.width = 512; c.height = 64;
-  x.fillStyle = "rgba(255,255,255,0.94)";
-  x.roundRect(0, 0, 512, 64, 18); x.fill();
-  x.strokeStyle = "#dde3ea"; x.lineWidth = 3; x.stroke();
-  x.fillStyle = "#2a3342"; x.font = "26px 'Segoe UI', sans-serif";
+  c.width = 1024; c.height = 128;
+  x.fillStyle = "rgba(255,255,255,0.97)";
+  x.roundRect(0, 0, 1024, 128, 30); x.fill();
+  x.strokeStyle = "#c7d0da"; x.lineWidth = 4; x.stroke();
+  x.fillStyle = "#111a26"; x.font = "600 52px 'Segoe UI', sans-serif";
   x.textAlign = "center"; x.textBaseline = "middle";
-  x.fillText(text, 256, 34);
+  x.fillText(text, 512, 68);
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map:new THREE.CanvasTexture(c), transparent:true, depthTest:false }));
   sprite.scale.set(w, w * 0.125, 1);
   return sprite;
@@ -336,6 +336,7 @@ async function addPrimitive(p) {
   const h = Math.max(bb.max.y, 1.2) + 0.4;
   const label = makeLabel(p.label);
   label.position.set(0, h, 0);
+  label.visible = false; // hover reveals it
   g.add(label);
   // Invisible pick box: shell navigation (view mode) or drag handle (CAD).
   const size = PICK_SIZE[p.kind] ?? [2, 2, 2];
@@ -358,16 +359,20 @@ async function buildOffice() {
   if (!spaceData) { console.warn("no /api/space; empty office"); return; }
   for (const p of spaceData.primitives) await addPrimitive(p);
   buildSlots();
+  buildObstacles();
 }
 
 // Agent slots derive from the live layout: move a desk in Space CAD and
 // agents sit at its new position. Fallbacks match the shipped default layout.
+// A slot is { pos:[x,0,z], sit, yaw, seatY } — sit slots play the sitting
+// clip at seatY (chair height) facing yaw; standing slots just face yaw.
+const spot = (pos, opts = {}) => ({ pos, sit: false, yaw: null, seatY: 0, ...opts });
 const SLOTS = {
-  desk: [[0,0,1.0],[2.9,0,-0.3],[-0.9,0,0.9],[3.7,0,-1.2],[0.9,0,1.3],[2.1,0,0.3]],
-  gate: [[3.8,0,1.8],[3.8,0,2.6]],
-  lounge: [[-1.4,0,3.3],[-2.3,0,3.5],[-1.0,0,4.0]],
+  desk: [[0,0,1.0],[2.9,0,-0.3],[-0.9,0,0.9],[3.7,0,-1.2],[0.9,0,1.3],[2.1,0,0.3]].map((p) => spot(p)),
+  gate: [[3.8,0,1.8],[3.8,0,2.6]].map((p) => spot(p)),
+  lounge: [[-1.4,0,3.3],[-2.3,0,3.5],[-1.0,0,4.0]].map((p) => spot(p)),
   council: [],
-  idleWander: [[0.5,0,2.0],[-3.0,0,-1.5],[2.0,0,3.0],[-0.5,0,-2.5]],
+  idleWander: [[0.5,0,2.0],[-3.0,0,-1.5],[2.0,0,3.0],[-0.5,0,-2.5]].map((p) => spot(p)),
 };
 function buildSlots() {
   const world = (entry, off) => {
@@ -375,22 +380,59 @@ function buildSlots() {
     const v = entry.group.localToWorld(new THREE.Vector3(off[0], 0, off[2]));
     return [v.x, 0, v.z];
   };
+  const yawOf = (entry, localYaw) => entry.group.rotation.y + localYaw;
   const ofKind = (kind) => [...zoneObjects.values()].filter((e) => e.primitive.kind === kind);
   const desks = ofKind("desk");
   if (desks.length) {
-    SLOTS.desk = desks.flatMap((e) => [world(e, [0, 0, 1.0]), world(e, [-0.9, 0, 0.9]), world(e, [0.9, 0, 1.3])]);
+    SLOTS.desk = desks.flatMap((e) => [
+      // desk chair (chairDesk sits at local [0,0,0.9] facing the desk)
+      spot(world(e, [0, 0, 0.95]), { sit: true, seatY: 0.42, yaw: yawOf(e, Math.PI) }),
+      spot(world(e, [-1.3, 0, 0.9]), { yaw: yawOf(e, Math.PI) }),
+      spot(world(e, [1.3, 0, 1.1]), { yaw: yawOf(e, Math.PI) }),
+    ]);
   }
   const gate = ofKind("security-gate")[0];
-  if (gate) SLOTS.gate = [world(gate, [-0.9, 0, 0]), world(gate, [-0.9, 0, 0.8])];
+  if (gate) SLOTS.gate = [spot(world(gate, [-0.9, 0, 0])), spot(world(gate, [-0.9, 0, 0.8]))];
   const lounge = ofKind("lounge")[0];
-  if (lounge) SLOTS.lounge = [world(lounge, [0.4, 0, -0.3]), world(lounge, [-0.6, 0, 0.1]), world(lounge, [0.9, 0, 0.5])];
+  if (lounge) {
+    SLOTS.lounge = [
+      // sofa seats (sofa at local [0,0,-0.4], facing the rug)
+      spot(world(lounge, [-0.5, 0, -0.35]), { sit: true, seatY: 0.3, yaw: yawOf(lounge, 0) }),
+      spot(world(lounge, [0.55, 0, -0.35]), { sit: true, seatY: 0.3, yaw: yawOf(lounge, 0) }),
+      // lounge chair at local [-1.4,0,0.3] rotY 1.2
+      spot(world(lounge, [-1.4, 0, 0.3]), { sit: true, seatY: 0.3, yaw: yawOf(lounge, 1.2) }),
+    ];
+  }
   const council = ofKind("council")[0];
   if (council) {
     SLOTS.council = [];
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2 + 0.3;
-      SLOTS.council.push(world(council, [Math.cos(a) * 1.7, 0, Math.sin(a) * 1.7]));
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      SLOTS.council.push(spot(world(council, [Math.cos(a) * 2.05, 0, Math.sin(a) * 2.05]), {
+        sit: true, seatY: 0.5,
+        yaw: yawOf(council, Math.atan2(-Math.cos(a), -Math.sin(a))),
+      }));
     }
+  }
+}
+
+// ---------- obstacles: agents steer around furniture ----------
+// Circle per primitive, sized to the furniture footprint (tighter than the
+// pick box). Lounge/decor stay walkable; an agent whose destination lies
+// inside a circle (its own desk chair, a council seat) ignores that circle.
+const OBSTACLE_R = {
+  desk: 1.15, vault: 1.15, whiteboard: 0.85, "design-board": 0.85,
+  "agenda-board": 0.8, "kanban-wall": 1.7, "security-gate": 0.45,
+  "skills-library": 0.95, council: 1.7, elevator: 0.9,
+};
+const obstacles = [];
+function buildObstacles() {
+  obstacles.length = 0;
+  for (const e of zoneObjects.values()) {
+    const r = OBSTACLE_R[e.primitive.kind];
+    if (!r) continue;
+    e.group.updateWorldMatrix(true, false);
+    obstacles.push({ x: e.group.position.x, z: e.group.position.z, r });
   }
 }
 
@@ -451,7 +493,7 @@ function slotFor(a, entry) {
       if (SLOTS.council.length) return SLOTS.council[(councilCursor++) % SLOTS.council.length];
       return SLOTS.lounge[(loungeCursor++) % SLOTS.lounge.length];
     case "idle": case "success": return SLOTS.lounge[(loungeCursor++) % SLOTS.lounge.length];
-    case "offline": return [entry.group.position.x, 0, entry.group.position.z];
+    case "offline": return spot([entry.group.position.x, 0, entry.group.position.z]);
     default: return SLOTS.idleWander[Math.floor(Math.random()*SLOTS.idleWander.length)];
   }
 }
@@ -476,9 +518,11 @@ function ensureAgent(a) {
       const idle = pickClip(robotTemplate.clips, "Idle");
       const walk = pickClip(robotTemplate.clips, "Walking", "Walk", "Running");
       const wave = pickClip(robotTemplate.clips, "Wave");
+      const sit = pickClip(robotTemplate.clips, "Sitting", "Sit");
       if (idle) { actions.idle = mixer.clipAction(idle); }
       if (walk) { actions.walk = mixer.clipAction(walk); }
       if (wave) { actions.wave = mixer.clipAction(wave); actions.wave.loop = THREE.LoopOnce; }
+      if (sit && sit !== idle) { actions.sit = mixer.clipAction(sit); }
       actions.idle?.play();
       // Normalize height from the SKELETON, not a bounding box. setFromObject on
       // a skinned mesh returns bind-pose geometry bounds (here ~150 units) while
@@ -516,7 +560,10 @@ function ensureAgent(a) {
   entry.data = a;
   // Offline agents leave the floor entirely instead of sinking through it.
   entry.group.visible = a.status !== "offline";
-  entry.target.fromArray(slotFor(a, entry));
+  const slot = slotFor(a, entry);
+  entry.seat = slot.sit ? slot : null;
+  entry.faceYaw = slot.yaw;
+  entry.target.fromArray(slot.pos);
   if (a.status === "success" && prevStatus !== "success" && entry.actions.wave) {
     entry.actions.wave.reset().play();
   }
@@ -578,9 +625,12 @@ let selectRing = null;
 function markDirty() {
   cadDirty = true;
   document.getElementById("cad-state").textContent = "unsaved changes";
+  buildObstacles(); // keep steering in sync with moved/added furniture
 }
 function setSelected(entry) {
+  if (selected && selected !== entry && selected !== hoverEntry) selected.label.visible = false;
   selected = entry;
+  if (entry) entry.label.visible = true;
   if (!selectRing) {
     selectRing = new THREE.Mesh(
       new THREE.RingGeometry(0.9, 1.05, 40),
@@ -615,10 +665,12 @@ if (CAD) {
   const bar = document.createElement("div");
   bar.id = "cadbar";
   const kinds = Object.keys(BUILDERS);
-  bar.innerHTML = `<b>SPACE CAD</b><span class="hint">click select · drag move · R rotate · Del delete</span>
-    <select id="cad-kind">${kinds.map((k) => `<option>${k}</option>`).join("")}</select>
+  bar.innerHTML = `<div class="cad-head"><b>SPACE CAD</b>
+      <span class="hint">click to select · drag to move · <kbd>R</kbd> rotate · <kbd>Del</kbd> delete · scroll to zoom</span>
+      <span id="cad-state"></span></div>
+    <div class="cad-controls"><select id="cad-kind">${kinds.map((k) => `<option>${k}</option>`).join("")}</select>
     <button id="cad-add">Add</button><button id="cad-dup">Duplicate</button><button id="cad-del">Delete</button>
-    <button id="cad-save">Save Layout</button><button id="cad-reset">Reload</button><span id="cad-state"></span>`;
+    <button id="cad-save">Save Layout</button><button id="cad-reset">Reload</button></div>`;
   document.body.appendChild(bar);
   const inspector = document.createElement("div");
   inspector.id = "cad-inspector";
@@ -631,13 +683,22 @@ if (CAD) {
   document.body.appendChild(inspector);
   const style = document.createElement("style");
   style.textContent = `#cadbar { position:fixed; top:12px; left:50%; transform:translateX(-50%);
-      display:flex; gap:8px; align-items:center; background:#fff; border:1px solid #dde3ea;
-      border-radius:10px; padding:8px 14px; box-shadow:0 6px 18px rgba(30,40,60,.1); z-index:10; }
-    #cadbar .hint { color:#68758a; font-size:11px; }
-    #cadbar button, #cadbar select { border:1px solid #dde3ea; background:#f6f8fa; border-radius:7px;
-      padding:5px 10px; font-weight:600; cursor:pointer; font-size:12px; }
+      display:flex; flex-direction:column; gap:9px; background:#fff; border:1px solid #dde3ea;
+      border-radius:12px; padding:12px 18px; box-shadow:0 8px 24px rgba(30,40,60,.12); z-index:10;
+      max-width:calc(100vw - 24px); box-sizing:border-box; }
+    #cadbar .cad-head { display:flex; align-items:baseline; gap:14px; white-space:nowrap; }
+    #cadbar .cad-head b { font-size:13px; letter-spacing:.1em; color:#1f2937; }
+    #cadbar .hint { color:#55647a; font-size:12px; overflow:hidden; text-overflow:ellipsis; }
+    #cadbar kbd { background:#eef1f5; border:1px solid #d5dce4; border-bottom-width:2px; border-radius:4px;
+      padding:0 5px; font:11px ui-monospace, monospace; color:#374151; }
+    #cadbar .cad-controls { display:flex; gap:8px; align-items:center; }
+    #cadbar button, #cadbar select { border:1px solid #d5dce4; background:#f6f8fa; border-radius:8px;
+      padding:7px 14px; font-weight:600; cursor:pointer; font-size:13px; color:#1f2937; flex-shrink:0; }
+    #cadbar select { padding:7px 10px; }
+    #cadbar button:hover { background:#eef1f5; }
     #cadbar #cad-save { background:#3b82f6; border-color:#3b82f6; color:#fff; }
-    #cadbar #cad-state { font-size:11px; color:#16a34a; }
+    #cadbar #cad-save:hover { background:#2f6fe0; }
+    #cadbar #cad-state { font-size:12px; font-weight:600; color:#16a34a; margin-left:auto; }
     #cad-inspector { position:fixed; right:12px; top:12px; width:230px; background:#fff;
       border:1px solid #dde3ea; border-radius:10px; padding:12px 14px; z-index:10; display:none;
       box-shadow:0 6px 18px rgba(30,40,60,.1); }
@@ -747,6 +808,32 @@ if (CAD) {
   addEventListener("beforeunload", (e) => { if (cadDirty) e.preventDefault(); });
 }
 
+// ---------- zoom (wheel / trackpad pinch) ----------
+addEventListener("wheel", (e) => {
+  if (e.target.closest?.("#cadbar, #cad-inspector, #panel, #approvals")) return;
+  e.preventDefault();
+  camera.zoom = Math.min(3.5, Math.max(0.45, camera.zoom * Math.exp(-e.deltaY * 0.0012)));
+  camera.updateProjectionMatrix();
+}, { passive: false });
+
+// ---------- hover: reveal zone labels ----------
+let hoverEntry = null;
+function setHover(entry) {
+  if (hoverEntry === entry) return;
+  if (hoverEntry) hoverEntry.label.visible = CAD && selected === hoverEntry;
+  hoverEntry = entry;
+  if (entry) entry.label.visible = true;
+  renderer.domElement.style.cursor = entry ? "pointer" : "default";
+}
+addEventListener("pointermove", (e) => {
+  if (dragging) return;
+  if (e.target !== renderer.domElement) { setHover(null); return; }
+  castPointer(e);
+  const hits = ray.intersectObjects(zonePickers, false);
+  const id = hits[0]?.object.userData.primId;
+  setHover(id ? zoneObjects.get(id) ?? null : null);
+});
+
 addEventListener("pointerdown", (e) => {
   if (e.target.closest?.("#cadbar, #cad-inspector")) return;
   castPointer(e);
@@ -848,7 +935,7 @@ function connect() {
 }
 
 window.__aura = {
-  agents, scene, zoneObjects, get spaceData() { return spaceData; },
+  agents, scene, zoneObjects, camera, obstacles, get spaceData() { return spaceData; },
   worldHeight(id) {
     const e = agents.get(id); if (!e) return null;
     e.group.updateWorldMatrix(true, true);
@@ -872,18 +959,58 @@ const clock = new THREE.Clock();
 let renderOn = true;
 new IntersectionObserver((entries) => { renderOn = entries[0].isIntersecting; })
   .observe(renderer.domElement);
+const WALK_SPEED = 1.7; // m/s
 function tick() {
   if (!renderOn) { requestAnimationFrame(tick); return; }
   const dt = Math.min(clock.getDelta(), 0.05);
   for (const entry of agents.values()) {
     const p = entry.group.position;
     const t = entry.target;
-    if (p.distanceTo(t) > 0.05) {
-      p.lerp(t, Math.min(1, dt * 2.2));
-      entry.group.rotation.y = Math.atan2(t.x - p.x, t.z - p.z);
+    const dist = Math.hypot(t.x - p.x, t.z - p.z);
+    if (dist > 0.06) {
+      const step = Math.min(dist, WALK_SPEED * dt);
+      const dx = (t.x - p.x) / dist, dz = (t.z - p.z) / dist;
+      let nx = p.x + dx * step, nz = p.z + dz * step;
+      // Steer around furniture: if the next step lands inside an obstacle
+      // circle, push out to its rim and slide along the tangent. Obstacles
+      // containing the destination (own chair) are ignored.
+      for (const o of obstacles) {
+        const tdx = t.x - o.x, tdz = t.z - o.z;
+        if (tdx * tdx + tdz * tdz < o.r * o.r) continue;
+        const ox = nx - o.x, oz = nz - o.z;
+        const d2 = ox * ox + oz * oz;
+        if (d2 < o.r * o.r && d2 > 1e-6) {
+          const d = Math.sqrt(d2);
+          let tx = -oz / d, tz = ox / d; // tangent, pick the side we're heading
+          if (tx * dx + tz * dz < 0) { tx = -tx; tz = -tz; }
+          nx = o.x + (ox / d) * o.r + tx * step;
+          nz = o.z + (oz / d) * o.r + tz * step;
+        }
+      }
+      entry.group.rotation.y = Math.atan2(nx - p.x, nz - p.z);
+      p.x = nx; p.z = nz;
+      p.y += (0 - p.y) * Math.min(1, dt * 6);
       setMode(entry, "walk");
     } else {
-      setMode(entry, "idle");
+      const seat = entry.seat;
+      if (seat && entry.actions.sit) {
+        // settle onto the chair: face the desk/table, ease up to seat height
+        if (entry.faceYaw != null) {
+          let dy = entry.faceYaw - entry.group.rotation.y;
+          dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+          entry.group.rotation.y += dy * Math.min(1, dt * 6);
+        }
+        p.y += (seat.seatY - p.y) * Math.min(1, dt * 6);
+        setMode(entry, "sit");
+      } else {
+        if (entry.faceYaw != null) {
+          let dy = entry.faceYaw - entry.group.rotation.y;
+          dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+          entry.group.rotation.y += dy * Math.min(1, dt * 6);
+        }
+        p.y += (0 - p.y) * Math.min(1, dt * 6);
+        setMode(entry, "idle");
+      }
     }
     entry.mixer?.update(dt);
   }
