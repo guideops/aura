@@ -1,4 +1,6 @@
-import type { Card, CardStatus } from "@aura/core";
+import type {
+  Card, CardStatus, CanvasMeta, CanvasBoard, CanvasNode, CanvasEdge, CanvasActivity, CanvasNodeExtras,
+} from "@aura/core";
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -118,7 +120,79 @@ export const api = {
       body: JSON.stringify(input),
     });
   },
+
+  // ---- Whiteboards ----
+  async listCanvases(): Promise<CanvasMeta[]> {
+    return (await json<{ canvases: CanvasMeta[] }>(await fetch("/api/canvas"))).canvases;
+  },
+  async createCanvas(name: string): Promise<CanvasMeta> {
+    return (await json<{ canvas: CanvasMeta }>(await fetch("/api/canvas", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+    }))).canvas;
+  },
+  async canvasBoard(id: string): Promise<CanvasBoard> {
+    return json(await fetch(`/api/canvas/${id}`));
+  },
+  async deleteCanvas(id: string): Promise<void> {
+    await fetch(`/api/canvas/${id}`, { method: "DELETE" });
+  },
+  async canvasBulk(id: string, input: {
+    nodes?: CanvasNodeInput[]; edges?: Partial<CanvasEdge>[]; removeNodes?: string[]; removeEdges?: string[];
+  }): Promise<CanvasBoard> {
+    return json(await fetch(`/api/canvas/${id}/bulk`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    }));
+  },
+  async canvasAddNode(id: string, node: CanvasNodeInput): Promise<CanvasNode> {
+    return (await json<{ node: CanvasNode }>(await fetch(`/api/canvas/${id}/nodes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(node),
+    }))).node;
+  },
+  async canvasPatchNode(id: string, nodeId: string, patch: Partial<CanvasNodeInput>): Promise<CanvasNode> {
+    return (await json<{ node: CanvasNode }>(await fetch(`/api/canvas/${id}/nodes/${nodeId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    }))).node;
+  },
+  async canvasRemoveNode(id: string, nodeId: string): Promise<void> {
+    await fetch(`/api/canvas/${id}/nodes/${nodeId}`, { method: "DELETE" });
+  },
+  async canvasAddEdge(id: string, edge: Partial<CanvasEdge> & { fromNode: string; toNode: string }): Promise<CanvasEdge> {
+    return (await json<{ edge: CanvasEdge }>(await fetch(`/api/canvas/${id}/edges`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(edge),
+    }))).edge;
+  },
+  async canvasRemoveEdge(id: string, edgeId: string): Promise<void> {
+    await fetch(`/api/canvas/${id}/edges/${edgeId}`, { method: "DELETE" });
+  },
+  async canvasActivity(id: string): Promise<CanvasActivity[]> {
+    return (await json<{ activity: CanvasActivity[] }>(await fetch(`/api/canvas/${id}/activity`))).activity;
+  },
+  async canvasAi(id: string, input: { action: string; prompt?: string; nodeIds?: string[] }): Promise<Response> {
+    return fetch(`/api/canvas/${id}/ai`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
+  },
 };
+
+export interface CanvasNodeInput {
+  id?: string;
+  type: "text" | "file" | "link" | "group";
+  x: number; y: number; width: number; height: number;
+  color?: string; text?: string; file?: string; url?: string; label?: string;
+  extras?: CanvasNodeExtras;
+}
 
 export interface UsageReport {
   models: { model: string; tokens: number; agents: number }[];

@@ -26,7 +26,9 @@ import { gitBranch as workspaceGitBranch, workspaceTree } from "./workspace.js";
 import { BoardProgress } from "./board-progress.js";
 import { SyncEngine, type ConflictReport, type GitHubProjectClient } from "./github-sync.js";
 import { OctokitProjectClient } from "./github-client.js";
-import type { BoardMessage } from "@aura/core";
+import type { BoardMessage, CanvasMessage } from "@aura/core";
+import { CanvasStore, type CreateNodeInput } from "./canvas-store.js";
+import { CanvasSync } from "./canvas-sync.js";
 
 const SERVER_VERSION = "0.1.0";
 
@@ -90,11 +92,15 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     ? options.dbPath.replace(/\.db$/, "") + ".board.db"
     : ":memory:";
   const board = new Board(boardDbPath);
+  const canvasDbPath = options.dbPath && options.dbPath !== ":memory:"
+    ? options.dbPath.replace(/\.db$/, "") + ".canvas.db"
+    : ":memory:";
+  const canvases = new CanvasStore(canvasDbPath);
   const skills = new SkillRegistry(options.skillsDir ?? path.join(process.cwd(), "skills"));
   const sockets = new Set<WebSocket>();
   const hookSessions = new Set<string>();
 
-  const broadcast = (msg: ServerMessage | BoardMessage) => {
+  const broadcast = (msg: ServerMessage | BoardMessage | CanvasMessage) => {
     const text = JSON.stringify(msg);
     for (const ws of sockets) {
       if (ws.readyState === ws.OPEN) ws.send(text);
@@ -104,12 +110,24 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
   // External vault edits (Obsidian, editors) → reindex → live UI refresh.
   const wireVault = (v: Vault) => v.watch((noteCount) => broadcast({ kind: "vault.updated", noteCount }));
   wireVault(vault);
+
+  // Whiteboards: SQLite truth, spec-pure .canvas files materialized into the
+  // vault for Obsidian viewing/editing; external edits import back live.
+  const canvasSync = new CanvasSync(
+    canvases,
+    () => vault.rootDir,
+    (canvasId, rev) => broadcast({ kind: "canvas.updated", canvasId, rev, origin: "external" }),
+  );
+  canvasSync.exportAll();
+  canvasSync.adoptExisting();
+  canvasSync.watch();
   /** Hot-swap the vault folder (Connections panel / adopt-from-peer). */
   const swapVault = (dir: string): number => {
     vault.close();
     vault = new Vault(dir, vaultDbPath);
     const count = vault.reindex();
     wireVault(vault);
+    canvasSync.rewire();
     writeConfig({ vaultDir: dir });
     broadcast({ kind: "vault.updated", noteCount: count });
     return count;
@@ -505,6 +523,201 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     return reply.send({ card: updated, session });
   });
 
+  // ---- Whiteboards (SQLite truth, .canvas materialized into the vault) ----
+  const canvasChanged = (canvasId: string, origin: "ui" | "agent", actor: string, action: string, detail = "") => {
+    canvasSync.export(canvasId);
+    canvases.logActivity(canvasId, actor, action, detail);
+    const meta = canvases.get(canvasId);
+    broadcast({ kind: "canvas.updated", canvasId, rev: meta?.rev ?? 0, origin });
+  };
+  const actorOf = (body: { agent?: string }): { actor: string; origin: "ui" | "agent" } => {
+    const agent = typeof body.agent === "string" && body.agent ? body.agent : null;
+    return agent ? { actor: agent, origin: "agent" } : { actor: "operator", origin: "ui" };
+  };
+
+  app.get("/api/canvas", async () => ({ canvases: canvases.list() }));
+  app.post("/api/canvas", async (req, reply) => {
+    const { name, slug } = (req.body ?? {}) as { name?: string; slug?: string };
+    if (!name) return reply.code(400).send({ error: "name required" });
+    const meta = canvases.create(name, slug);
+    canvases.logActivity(meta.id, "operator", "created", name);
+    canvasSync.export(meta.id);
+    broadcast({ kind: "canvas.created", canvas: meta });
+    return reply.send({ canvas: meta });
+  });
+  app.get("/api/canvas/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = canvases.board(id);
+    if (!b) return reply.code(404).send({ error: "not found" });
+    return b;
+  });
+  app.delete("/api/canvas/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const meta = canvases.remove(id);
+    if (!meta) return reply.code(404).send({ error: "not found" });
+    canvasSync.removeFile(meta.slug);
+    broadcast({ kind: "canvas.removed", canvasId: id });
+    return reply.send({ ok: true });
+  });
+
+  // Bulk apply (shell autosave, agent batches): one rev bump, one export.
+  app.post("/api/canvas/:id/bulk", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = (req.body ?? {}) as {
+      nodes?: CreateNodeInput[]; edges?: never[]; removeNodes?: string[]; removeEdges?: string[]; agent?: string;
+    };
+    const board2 = canvases.bulk(id, b);
+    if (!board2) return reply.code(404).send({ error: "not found" });
+    const { actor, origin } = actorOf(b);
+    canvasChanged(id, origin, actor, "edited",
+      `${b.nodes?.length ?? 0} node(s), ${b.edges?.length ?? 0} edge(s), removed ${(b.removeNodes?.length ?? 0) + (b.removeEdges?.length ?? 0)}`);
+    return reply.send(board2);
+  });
+
+  app.post("/api/canvas/:id/nodes", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = (req.body ?? {}) as CreateNodeInput & { agent?: string };
+    const { actor, origin } = actorOf(b);
+    if (origin === "agent") b.extras = { ...b.extras, agent: actor, ts: Date.now() };
+    const node = canvases.upsertNode(id, b);
+    if (!node) return reply.code(404).send({ error: "not found" });
+    canvasChanged(id, origin, actor,
+      b.extras?.kind === "comment" ? "commented" : "added node",
+      (b.text ?? b.label ?? b.file ?? "").slice(0, 120));
+    return reply.send({ node });
+  });
+  app.patch("/api/canvas/:id/nodes/:nodeId", async (req, reply) => {
+    const { id, nodeId } = req.params as { id: string; nodeId: string };
+    if (!canvases.node(id, nodeId)) return reply.code(404).send({ error: "not found" });
+    const b = (req.body ?? {}) as Partial<CreateNodeInput> & { agent?: string };
+    const node = canvases.upsertNode(id, { ...b, id: nodeId } as CreateNodeInput & { id: string });
+    const { actor, origin } = actorOf(b);
+    canvasChanged(id, origin, actor, "updated node", nodeId);
+    return reply.send({ node });
+  });
+  app.delete("/api/canvas/:id/nodes/:nodeId", async (req, reply) => {
+    const { id, nodeId } = req.params as { id: string; nodeId: string };
+    if (!canvases.removeNode(id, nodeId)) return reply.code(404).send({ error: "not found" });
+    canvasChanged(id, "ui", "operator", "removed node", nodeId);
+    return reply.send({ ok: true });
+  });
+
+  app.post("/api/canvas/:id/edges", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = (req.body ?? {}) as { fromNode?: string; toNode?: string; label?: string; agent?: string };
+    if (!b.fromNode || !b.toNode) return reply.code(400).send({ error: "fromNode and toNode required" });
+    const edge = canvases.upsertEdge(id, b as { fromNode: string; toNode: string });
+    if (!edge) return reply.code(404).send({ error: "not found" });
+    const { actor, origin } = actorOf(b);
+    canvasChanged(id, origin, actor, "connected", `${b.fromNode} → ${b.toNode}`);
+    return reply.send({ edge });
+  });
+  app.delete("/api/canvas/:id/edges/:edgeId", async (req, reply) => {
+    const { id, edgeId } = req.params as { id: string; edgeId: string };
+    if (!canvases.removeEdge(id, edgeId)) return reply.code(404).send({ error: "not found" });
+    canvasChanged(id, "ui", "operator", "removed edge", edgeId);
+    return reply.send({ ok: true });
+  });
+
+  app.get("/api/canvas/:id/activity", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!canvases.get(id)) return reply.code(404).send({ error: "not found" });
+    return { activity: canvases.activity(id) };
+  });
+
+  // AI actions. create-tasks / convert-to-prd are deterministic; the rest run
+  // through Hermes when configured (409 otherwise).
+  app.post("/api/canvas/:id/ai", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = (req.body ?? {}) as { action?: string; prompt?: string; nodeIds?: string[] };
+    const boardState = canvases.board(id);
+    if (!boardState) return reply.code(404).send({ error: "not found" });
+    const selected = boardState.nodes.filter((n) =>
+      b.nodeIds?.length ? b.nodeIds.includes(n.id) : true);
+    const textOf = (n: (typeof selected)[number]) => n.text ?? n.label ?? n.file ?? "";
+    const selectedText = selected.map(textOf).filter(Boolean).join("\n\n");
+    const rightOf = () => Math.max(0, ...boardState.nodes.map((n) => n.x + n.width)) + 80;
+
+    if (b.action === "create-tasks") {
+      const sources = selected.filter((n) => (n.text ?? "").trim());
+      if (!sources.length) return reply.code(400).send({ error: "no text nodes selected" });
+      const created = sources.map((n) => {
+        const lines = n.text!.trim().split("\n");
+        const title = lines[0]!.replace(/^#+\s*/, "").slice(0, 120);
+        const card = board.create({ title, body: lines.slice(1).join("\n").trim(), tags: ["whiteboard"] });
+        emitCard(card);
+        return card;
+      });
+      canvasChanged(id, "ui", "operator", "created tasks", `${created.length} card(s)`);
+      return reply.send({ ok: true, cards: created });
+    }
+
+    if (b.action === "convert-to-prd") {
+      if (!selectedText.trim()) return reply.code(400).send({ error: "no content selected" });
+      const slug = `docs/prd-${boardState.canvas.slug.split("/").pop()}-${Date.now().toString(36)}`;
+      const md = `# PRD — ${boardState.canvas.name}\n\n> Generated from whiteboard "${boardState.canvas.name}".\n\n${selectedText}\n`;
+      vault.write(slug, md);
+      const node = canvases.upsertNode(id, {
+        type: "file", file: `${slug}.md`,
+        x: rightOf(), y: 0, width: 320, height: 160,
+      });
+      canvasChanged(id, "ui", "operator", "converted to PRD", slug);
+      return reply.send({ ok: true, slug, node });
+    }
+
+    // LLM-backed actions from here down.
+    if (!hermesClient) return reply.code(409).send({ error: "hermes not configured — set AURA_HERMES_KEY" });
+    const boardContext = boardState.nodes
+      .map((n) => `- [${n.type}] ${textOf(n).slice(0, 200)}`).join("\n").slice(0, 6000);
+
+    if (b.action === "generate-diagram") {
+      const ask = b.prompt ?? selectedText ?? boardState.canvas.name;
+      const res = await hermesClient.run({
+        system:
+          'You produce flowcharts as JSON. Reply with ONLY a JSON object: {"nodes":[{"text":string,"x":number,"y":number,"width":number,"height":number}],"edges":[{"from":number,"to":number,"label":string}]} where from/to are node array indices. Layout left-to-right starting at x=0,y=0, node size ~200x90, gaps of 80.',
+        prompt: `Create a flowchart for: ${ask}\n\nExisting board context:\n${boardContext}`,
+      });
+      const json = res.text.match(/\{[\s\S]*\}/)?.[0];
+      let spec: { nodes?: { text?: string; x?: number; y?: number; width?: number; height?: number }[]; edges?: { from?: number; to?: number; label?: string }[] };
+      try { spec = JSON.parse(json ?? ""); } catch {
+        return reply.code(502).send({ error: "hermes returned unparseable diagram", raw: res.text.slice(0, 500) });
+      }
+      const ox = rightOf(); const oy = 0;
+      const made = (spec.nodes ?? []).map((n) =>
+        canvases.upsertNode(id, {
+          type: "text", text: n.text ?? "", x: ox + (n.x ?? 0), y: oy + (n.y ?? 0),
+          width: n.width ?? 200, height: n.height ?? 90, color: "5",
+          extras: { kind: "shape", shape: "rect", agent: "hermes", ts: Date.now() },
+        })!);
+      for (const e of spec.edges ?? []) {
+        const from = made[e.from ?? -1]; const to = made[e.to ?? -1];
+        if (from && to) canvases.upsertEdge(id, { fromNode: from.id, toNode: to.id, ...(e.label ? { label: e.label } : {}) });
+      }
+      canvasChanged(id, "agent", "hermes", "generated diagram", `${made.length} node(s)`);
+      return reply.send({ ok: true, nodes: made.length, edges: (spec.edges ?? []).length });
+    }
+
+    if (b.action === "summarize" || b.action === "expand" || b.action === "ask") {
+      const instruction =
+        b.action === "summarize" ? "Summarize the key points concisely as markdown bullets."
+        : b.action === "expand" ? "Elaborate and structure this content as markdown. Stay grounded in what's there."
+        : (b.prompt ?? "Comment on this board.");
+      const res = await hermesClient.run({
+        system: "You are an assistant working on a shared whiteboard. Reply in concise markdown, no preamble.",
+        prompt: `${instruction}\n\n${b.nodeIds?.length ? `Selection:\n${selectedText}\n\n` : ""}Board "${boardState.canvas.name}" contents:\n${boardContext}`,
+      });
+      const node = canvases.upsertNode(id, {
+        type: "text", text: res.text.trim(),
+        x: rightOf(), y: 0, width: 300, height: 200, color: "6",
+        extras: { kind: "comment", agent: "hermes", ts: Date.now() },
+      });
+      canvasChanged(id, "agent", "hermes", b.action === "ask" ? "answered" : `${b.action}d`, res.text.slice(0, 120));
+      return reply.send({ ok: true, node, text: res.text });
+    }
+
+    return reply.code(400).send({ error: `unknown action "${b.action}"` });
+  });
+
   // GitHub Projects v2 sync. Token held in memory only — NEVER persisted here;
   // Electron builds inject it via OS keychain (safeStorage) at Phase 6.
   let syncEngine: SyncEngine | null = null;
@@ -800,7 +1013,7 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     };
   });
 
-  app.addHook("onClose", async () => { stopSyncTimer(); vault.close(); board.close(); syncEngine?.close(); });
+  app.addHook("onClose", async () => { stopSyncTimer(); canvasSync.close(); canvases.close(); vault.close(); board.close(); syncEngine?.close(); });
 
   return { app, bus, store, log, guardrails, get vault() { return vault; }, board, skills, hookSessions };
 }

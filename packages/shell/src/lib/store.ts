@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
-import type { ActionRequest, AgentEvent, AgentSnapshot, BoardMessage, Card, ServerMessage } from "@aura/core";
+import type { ActionRequest, AgentEvent, AgentSnapshot, BoardMessage, CanvasMessage, Card, ServerMessage } from "@aura/core";
+import { onCanvasMessage } from "./whiteboard-store";
 
 export type PendingApproval = ActionRequest;
 
@@ -80,7 +81,11 @@ function upsertAgent(agent: AgentSnapshot) {
   emit({ agents: [...rest, agent].sort((a, b) => a.agentId.localeCompare(b.agentId)) });
 }
 
-function handleMessage(msg: ServerMessage | BoardMessage) {
+function handleMessage(msg: ServerMessage | BoardMessage | CanvasMessage) {
+  if (msg.kind === "canvas.updated" || msg.kind === "canvas.created" || msg.kind === "canvas.removed") {
+    onCanvasMessage(msg);
+    return;
+  }
   switch (msg.kind) {
     case "card.upsert": {
       const prev = state.cards.find((c) => c.id === msg.card.id);

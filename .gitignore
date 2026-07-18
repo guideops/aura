@@ -16,3 +16,5 @@ office.space.json
 aura.peers.json
 aura.config.json
 packages/daemon/public/shell/
+vault/boards/
+vault/docs/

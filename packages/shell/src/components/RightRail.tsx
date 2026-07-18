@@ -6,6 +6,7 @@ import { SystemOverview } from "./SystemOverview";
 import type { CenterTab } from "./CenterArea";
 import type { ZoneContext } from "../lib/zones";
 import { ZONE_ACTIONS } from "../lib/zones";
+import { WhiteboardAssistant } from "./WhiteboardAssistant";
 
 /**
  * Contextual widget stack (reference S1/S2): System Overview pinned on top,
@@ -33,11 +34,17 @@ export function RightRail({
       <SystemOverview onOpenOffice={() => onOpenTab("office")} />
       <div className="rail-widgets">
         {zone && <ZoneActionsWidget zone={zone} onOpenTab={onOpenTab} onClose={onCloseZone} />}
-        {showInspector && <Inspector cardId={selectedCard} onClose={() => onSelectCard(null)} />}
-        {!showInspector && (
+        {tab === "whiteboard" ? (
+          <WhiteboardAssistant />
+        ) : (
           <>
-            <UsageTracking />
-            <SecurityOverview />
+            {showInspector && <Inspector cardId={selectedCard} onClose={() => onSelectCard(null)} />}
+            {!showInspector && (
+              <>
+                <UsageTracking />
+                <SecurityOverview />
+              </>
+            )}
           </>
         )}
       </div>

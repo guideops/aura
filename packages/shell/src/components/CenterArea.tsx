@@ -1,10 +1,12 @@
 import { KanbanWall } from "./KanbanWall";
+import { Whiteboard } from "./Whiteboard";
 
-export type CenterTab = "kanban" | "office" | "cad";
+export type CenterTab = "kanban" | "office" | "cad" | "whiteboard";
 
 const TABS: { id: CenterTab; label: string }[] = [
   { id: "office", label: "Office" },
   { id: "kanban", label: "Kanban Wall" },
+  { id: "whiteboard", label: "Whiteboard" },
   { id: "cad", label: "Space CAD" },
 ];
 
@@ -37,6 +39,7 @@ export function CenterArea({
         {tab === "kanban" && (
           <KanbanWall selectedCard={selectedCard} onSelectCard={onSelectCard} />
         )}
+        {tab === "whiteboard" && <Whiteboard />}
         {tab === "office" && (
           <iframe className="embed-frame" src="/office.html?embed=1" title="Office" />
         )}
