@@ -190,7 +190,17 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
   });
 
   if (options.publicDir) {
-    void app.register(fastifyStatic, { root: options.publicDir });
+    void app.register(fastifyStatic, { root: options.publicDir, index: false });
+    // The React shell (/shell) is the one canonical UI. Root and the retired
+    // static prototype route both redirect to it, so an old bookmark can't
+    // land anyone on a dead page. Explicit routes win over the static wildcard.
+    app.get("/", async (_req, reply) => reply.redirect("/shell/"));
+    app.get("/app", async (_req, reply) => reply.redirect("/shell/"));
+    app.get("/app/*", async (_req, reply) => reply.redirect("/shell/"));
+    // fastify-static needs an explicit handler for the shell index since
+    // index serving is disabled above.
+    app.get("/shell", async (_req, reply) => reply.redirect("/shell/"));
+    app.get("/shell/", async (_req, reply) => reply.sendFile("shell/index.html"));
   }
 
   // Claude Code hook ingress. Always 200 fast — hooks must never slow the agent.
