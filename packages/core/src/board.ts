@@ -78,6 +78,7 @@ export const Card = z.object({
   timeline: z.array(CardTimelineEntry).default([]),
   /** Operator-authored comment awaiting write-back to the source system. */
   pendingComment: z.string().nullable().default(null),
+  blockKind: z.enum(["dependency", "needs_input", "capability", "transient"]).nullable().default(null),
   /** Provider session bound to this card (set when a spawned session starts). */
   sessionId: z.string().nullable().default(null),
   /** Monotonic local version; bumped on every local mutation for conflict detection. */

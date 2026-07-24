@@ -17,6 +17,22 @@ const COLUMNS: { status: CardStatus; title: string; tone: string }[] = [
 type SortMode = "manual" | "updated" | "title" | "progress";
 type GroupMode = "status" | "assignee" | "tag" | "project";
 
+const BLOCK_KIND_LABEL: Record<NonNullable<Card["blockKind"]>, string> = {
+  needs_input: "needs you",
+  dependency: "waiting on task",
+  capability: "missing capability",
+  transient: "transient",
+};
+
+export function isLegalMove(from: CardStatus, to: CardStatus): boolean {
+  if (from === to) return false;
+  if (to === "done") return from !== "done";
+  if (to === "blocked") return from !== "blocked";
+  if (from === "blocked" && (to === "todo" || to === "ready")) return true;
+  if (from === "todo" && to === "ready") return true;
+  return (from === "todo" || from === "ready") && to === "scheduled";
+}
+
 export function KanbanWall({
   selectedCard,
   onSelectCard,
@@ -30,6 +46,7 @@ export function KanbanWall({
   const [group, setGroup] = useState<GroupMode>("status");
   const [showNew, setShowNew] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
+  const [rejected, setRejected] = useState<{ id: string; hint: string } | null>(null);
   const [repo, setRepo] = useState<string | null>(null);
 
   useEffect(() => {
@@ -72,8 +89,16 @@ export function KanbanWall({
     const card = cards.find((c) => c.id === dragId);
     setDragId(null);
     if (!card || card.status === status) return;
+    if (card.externalRef?.startsWith("hermes:") && !isLegalMove(card.status, status)) {
+      const hint = `No Hermes verb for ${card.status} → ${status}`;
+      setRejected({ id: card.id, hint });
+      window.setTimeout(() => setRejected((current) => current?.id === card.id ? null : current), 600);
+      return;
+    }
     void api.patchCard(card.id, { status });
   };
+
+  const draggedCard = dragId ? cards.find((card) => card.id === dragId) : undefined;
 
   return (
     <div className="kanban">
@@ -116,10 +141,21 @@ export function KanbanWall({
         </div>
       </div>
       <div className="kanban-columns">
-        {buildColumns(group, visible).map((col) => (
+        {buildColumns(group, visible).map((col) => {
+          const illegalTarget = Boolean(
+            col.status && draggedCard?.externalRef?.startsWith("hermes:")
+            && !isLegalMove(draggedCard.status, col.status),
+          );
+          const dragHint = illegalTarget && col.status
+            ? `No Hermes verb for ${draggedCard!.status} → ${col.status}`
+            : undefined;
+          return (
           <div
             key={col.key}
             className={`kanban-col ${col.tone}`}
+            style={illegalTarget ? { opacity: 0.48, filter: "grayscale(0.5)" } : undefined}
+            title={dragHint}
+            aria-disabled={illegalTarget || undefined}
             onDragOver={(e) => e.preventDefault()}
             onDrop={() => col.status && drop(col.status)}
           >
@@ -133,6 +169,7 @@ export function KanbanWall({
                   key={card.id}
                   card={card}
                   selected={card.id === selectedCard}
+                  rejectedHint={rejected?.id === card.id ? rejected.hint : undefined}
                   onSelect={() => onSelectCard(card.id === selectedCard ? null : card.id)}
                   onDragStart={() => setDragId(card.id)}
                 />
@@ -142,7 +179,8 @@ export function KanbanWall({
               </button>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
       {showNew && <NewCardModal onClose={() => setShowNew(false)} />}
     </div>
@@ -185,11 +223,13 @@ function buildColumns(group: GroupMode, cards: Card[]): ColumnDef[] {
 function CardTile({
   card,
   selected,
+  rejectedHint,
   onSelect,
   onDragStart,
 }: {
   card: Card;
   selected: boolean;
+  rejectedHint: string | undefined;
   onSelect: () => void;
   onDragStart: () => void;
 }) {
@@ -199,6 +239,14 @@ function CardTile({
   return (
     <div
       className={`card-tile ${selected ? "selected" : ""}`}
+      style={rejectedHint ? {
+        transform: "translateX(5px)",
+        boxShadow: "0 0 0 2px var(--danger, #ef4444)",
+        background: "color-mix(in srgb, var(--danger, #ef4444) 12%, transparent)",
+        transition: "all 80ms ease",
+      } : undefined}
+      title={rejectedHint}
+      aria-label={rejectedHint ? `${card.key}: ${rejectedHint}` : undefined}
       draggable
       onDragStart={onDragStart}
       onClick={onSelect}
@@ -218,6 +266,11 @@ function CardTile({
           {card.assignee ?? "unassigned"}
         </span>
         {card.status === "review" && <span className="badge-review">Review</span>}
+        {card.status === "blocked" && card.blockKind && (
+          <span className={card.blockKind === "needs_input" ? "badge-review" : "card-checks"}>
+            {BLOCK_KIND_LABEL[card.blockKind]}
+          </span>
+        )}
         {done && <span className="badge-done">✓ Done</span>}
         {checklist.length > 0 && (
           <span className="card-checks">

@@ -3,6 +3,13 @@ import type { Card, CardStatus } from "@aura/core";
 import { api } from "../lib/api";
 import { agentColor, useShell } from "../lib/store";
 
+const BLOCK_KIND_LABEL: Record<NonNullable<Card["blockKind"]>, string> = {
+  needs_input: "needs you",
+  dependency: "waiting on task",
+  capability: "missing capability",
+  transient: "transient",
+};
+
 const STATUS_LABEL: Record<CardStatus, string> = {
   triage: "Triage",
   todo: "Todo",
@@ -124,6 +131,12 @@ export function Inspector({
               ))}
             </select>
           </dd>
+          {card.status === "blocked" && card.blockKind && (
+            <>
+              <dt>Blocked</dt>
+              <dd>{BLOCK_KIND_LABEL[card.blockKind]}</dd>
+            </>
+          )}
           <dt>Assignee</dt>
           <dd>
             <i className="avatar-dot" style={{ background: agentColor(card.assignee) }} />
