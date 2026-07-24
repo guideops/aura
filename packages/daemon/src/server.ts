@@ -459,6 +459,7 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     const b = (req.body ?? {}) as {
       title?: string; body?: string; status?: CardStatus; tags?: string[];
       externalRef?: string; priority?: "low" | "medium" | "high" | "urgent"; milestone?: string; project?: string | null;
+      comments?: Card["comments"]; links?: Card["links"]; timeline?: Card["timeline"]; pendingComment?: string | null;
     };
     if (!b.title) return reply.code(400).send({ error: "title required" });
     // Idempotent peer ingestion: same externalRef updates rather than duplicates.
@@ -470,6 +471,10 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
         if (b.status !== undefined) patch.status = b.status;
         if (b.tags !== undefined) patch.tags = b.tags;
         if (b.project !== undefined) patch.project = b.project;
+        if (b.comments !== undefined) patch.comments = b.comments;
+        if (b.links !== undefined) patch.links = b.links;
+        if (b.timeline !== undefined) patch.timeline = b.timeline;
+        if (b.pendingComment !== undefined) patch.pendingComment = b.pendingComment;
         const updated = board.update(existing.id, patch);
         if (updated) emitCard(updated);
         return reply.send({ card: updated });
@@ -478,6 +483,7 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     const created: {
       title: string; body?: string; status?: CardStatus; tags?: string[];
       externalRef?: string; priority?: "low" | "medium" | "high" | "urgent"; milestone?: string; project?: string | null;
+      comments?: Card["comments"]; links?: Card["links"]; timeline?: Card["timeline"]; pendingComment?: string | null;
     } = { title: b.title };
     if (b.body !== undefined) created.body = b.body;
     if (b.status !== undefined) created.status = b.status;
@@ -486,6 +492,10 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     if (b.priority !== undefined) created.priority = b.priority;
     if (b.milestone !== undefined) created.milestone = b.milestone;
     if (b.project !== undefined) created.project = b.project;
+    if (b.comments !== undefined) created.comments = b.comments;
+    if (b.links !== undefined) created.links = b.links;
+    if (b.timeline !== undefined) created.timeline = b.timeline;
+    if (b.pendingComment !== undefined) created.pendingComment = b.pendingComment;
     const card = board.create(created);
     emitCard(card);
     return reply.send({ card });

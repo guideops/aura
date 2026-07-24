@@ -29,6 +29,31 @@ export const ChecklistItem = z.object({
 });
 export type ChecklistItem = z.infer<typeof ChecklistItem>;
 
+export const CardComment = z.object({
+  id: z.string(),
+  author: z.string().nullable().default(null),
+  text: z.string(),
+  ts: z.number(),
+});
+export type CardComment = z.infer<typeof CardComment>;
+
+export const CardLink = z.object({
+  /** "parent" | "child" relative to this card. */
+  rel: z.enum(["parent", "child"]),
+  /** Peer task id of the other end, e.g. "t_795ad793". */
+  ref: z.string(),
+  title: z.string().default(""),
+});
+export type CardLink = z.infer<typeof CardLink>;
+
+export const CardTimelineEntry = z.object({
+  id: z.string(),
+  ts: z.number(),
+  kind: z.string(),
+  summary: z.string().default(""),
+});
+export type CardTimelineEntry = z.infer<typeof CardTimelineEntry>;
+
 export const Card = z.object({
   id: z.string(), // local id (ULID)
   key: z.string(), // human key, e.g. "AURA-201"
@@ -45,6 +70,14 @@ export const Card = z.object({
   milestone: z.string().nullable().default(null),
   project: z.string().nullable().default(null),
   checklist: z.array(ChecklistItem).default([]),
+  /** Comments mirrored from the source system. */
+  comments: z.array(CardComment).default([]),
+  /** Parent and child task links mirrored from the source system. */
+  links: z.array(CardLink).default([]),
+  /** Event history mirrored from the source system. */
+  timeline: z.array(CardTimelineEntry).default([]),
+  /** Operator-authored comment awaiting write-back to the source system. */
+  pendingComment: z.string().nullable().default(null),
   /** Provider session bound to this card (set when a spawned session starts). */
   sessionId: z.string().nullable().default(null),
   /** Monotonic local version; bumped on every local mutation for conflict detection. */

@@ -1,6 +1,13 @@
 import Database from "better-sqlite3";
 import { ulid } from "ulid";
-import { Card, type CardPriority, type CardStatus } from "@aura/core";
+import {
+  Card,
+  type CardComment,
+  type CardLink,
+  type CardPriority,
+  type CardStatus,
+  type CardTimelineEntry,
+} from "@aura/core";
 
 export interface CreateCardInput {
   title: string;
@@ -12,6 +19,10 @@ export interface CreateCardInput {
   priority?: CardPriority;
   milestone?: string;
   project?: string | null;
+  comments?: CardComment[];
+  links?: CardLink[];
+  timeline?: CardTimelineEntry[];
+  pendingComment?: string | null;
 }
 
 /**
@@ -52,6 +63,10 @@ export class Board {
     try { this.db.exec("ALTER TABLE cards ADD COLUMN milestone TEXT"); } catch { /* exists */ }
     try { this.db.exec("ALTER TABLE cards ADD COLUMN project TEXT"); } catch { /* exists */ }
     try { this.db.exec("ALTER TABLE cards ADD COLUMN checklist TEXT NOT NULL DEFAULT '[]'"); } catch { /* exists */ }
+    try { this.db.exec("ALTER TABLE cards ADD COLUMN comments TEXT NOT NULL DEFAULT '[]'"); } catch { /* exists */ }
+    try { this.db.exec("ALTER TABLE cards ADD COLUMN links TEXT NOT NULL DEFAULT '[]'"); } catch { /* exists */ }
+    try { this.db.exec("ALTER TABLE cards ADD COLUMN timeline TEXT NOT NULL DEFAULT '[]'"); } catch { /* exists */ }
+    try { this.db.exec("ALTER TABLE cards ADD COLUMN pending_comment TEXT"); } catch { /* exists */ }
     this.db.exec("UPDATE cards SET status='todo' WHERE status='backlog'; UPDATE cards SET status='running' WHERE status='in_progress';");
     const maxKey = this.db
       .prepare("SELECT key FROM cards WHERE key LIKE 'AURA-%' ORDER BY CAST(SUBSTR(key,6) AS INTEGER) DESC LIMIT 1")
@@ -92,6 +107,10 @@ export class Board {
       milestone: input.milestone ?? null,
       project: input.project ?? null,
       checklist: [],
+      comments: input.comments ?? [],
+      links: input.links ?? [],
+      timeline: input.timeline ?? [],
+      pendingComment: input.pendingComment ?? null,
       sessionId: null,
       rev: 0,
       updatedAt: Date.now(),
@@ -129,16 +148,25 @@ export class Board {
   private insert(card: Card): void {
     this.db
       .prepare(
-        `INSERT INTO cards (id, key, title, body, status, tags, assignee, progress, external_id, external_ref, priority, milestone, project, checklist, session_id, rev, updated_at)
-         VALUES (@id, @key, @title, @body, @status, @tags, @assignee, @progress, @externalId, @externalRef, @priority, @milestone, @project, @checklist, @sessionId, @rev, @updatedAt)
+        `INSERT INTO cards (id, key, title, body, status, tags, assignee, progress, external_id, external_ref, priority, milestone, project, checklist, comments, links, timeline, pending_comment, session_id, rev, updated_at)
+         VALUES (@id, @key, @title, @body, @status, @tags, @assignee, @progress, @externalId, @externalRef, @priority, @milestone, @project, @checklist, @comments, @links, @timeline, @pendingComment, @sessionId, @rev, @updatedAt)
          ON CONFLICT(id) DO UPDATE SET
            key=excluded.key, title=excluded.title, body=excluded.body, status=excluded.status,
            tags=excluded.tags, assignee=excluded.assignee, progress=excluded.progress,
            external_id=excluded.external_id, external_ref=excluded.external_ref, priority=excluded.priority,
            milestone=excluded.milestone, project=excluded.project, checklist=excluded.checklist,
-           session_id=excluded.session_id, rev=excluded.rev, updated_at=excluded.updated_at`,
+           comments=excluded.comments, links=excluded.links, timeline=excluded.timeline,
+           pending_comment=excluded.pending_comment, session_id=excluded.session_id,
+           rev=excluded.rev, updated_at=excluded.updated_at`,
       )
-      .run({ ...card, tags: JSON.stringify(card.tags), checklist: JSON.stringify(card.checklist) });
+      .run({
+        ...card,
+        tags: JSON.stringify(card.tags),
+        checklist: JSON.stringify(card.checklist),
+        comments: JSON.stringify(card.comments),
+        links: JSON.stringify(card.links),
+        timeline: JSON.stringify(card.timeline),
+      });
   }
 }
 
@@ -147,7 +175,17 @@ interface RawCard {
   tags: string; assignee: string | null; progress: number;
   external_id: string | null; external_ref: string | null; priority: string;
   milestone: string | null; project: string | null; checklist: string;
+  comments: string; links: string; timeline: string; pending_comment: string | null;
   session_id: string | null; rev: number; updated_at: number;
+}
+
+function parseArray(value: string | null | undefined): unknown[] {
+  try {
+    const parsed = JSON.parse(value || "[]") as unknown;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 function hydrate(r: RawCard): Card {
@@ -155,7 +193,9 @@ function hydrate(r: RawCard): Card {
     id: r.id, key: r.key, title: r.title, body: r.body, status: r.status,
     tags: JSON.parse(r.tags) as string[], assignee: r.assignee, progress: r.progress,
     externalId: r.external_id, externalRef: r.external_ref, priority: r.priority,
-    milestone: r.milestone, project: r.project, checklist: JSON.parse(r.checklist || "[]") as unknown[],
+    milestone: r.milestone, project: r.project, checklist: parseArray(r.checklist),
+    comments: parseArray(r.comments), links: parseArray(r.links), timeline: parseArray(r.timeline),
+    pendingComment: r.pending_comment,
     sessionId: r.session_id, rev: r.rev, updatedAt: r.updated_at,
   });
 }
