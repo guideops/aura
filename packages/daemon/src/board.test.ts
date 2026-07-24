@@ -6,19 +6,19 @@ beforeEach(() => { board = new Board(":memory:"); });
 afterEach(() => board.close());
 
 describe("Board", () => {
-  it("creates cards with incrementing AURA keys in backlog", () => {
+  it("creates cards with incrementing AURA keys in todo", () => {
     const a = board.create({ title: "First" });
     const b = board.create({ title: "Second" });
     expect(a.key).toBe("AURA-201");
     expect(b.key).toBe("AURA-202");
-    expect(a.status).toBe("backlog");
+    expect(a.status).toBe("todo");
     expect(a.rev).toBe(0);
   });
 
   it("bumps rev + updatedAt on every update", () => {
     const c = board.create({ title: "x" });
-    const moved = board.update(c.id, { status: "in_progress" })!;
-    expect(moved.status).toBe("in_progress");
+    const moved = board.update(c.id, { status: "running" })!;
+    expect(moved.status).toBe("running");
     expect(moved.rev).toBe(1);
     const again = board.update(c.id, { progress: 50 })!;
     expect(again.rev).toBe(2);

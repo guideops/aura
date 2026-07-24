@@ -4,14 +4,18 @@ import { api } from "../lib/api";
 import { agentColor, setCards, useShell } from "../lib/store";
 
 const COLUMNS: { status: CardStatus; title: string; tone: string }[] = [
-  { status: "backlog", title: "To Do", tone: "tone-slate" },
-  { status: "in_progress", title: "In Progress", tone: "tone-blue" },
-  { status: "review", title: "In Review", tone: "tone-amber" },
+  { status: "triage", title: "Triage", tone: "tone-slate" },
+  { status: "todo", title: "Todo", tone: "tone-slate" },
+  { status: "ready", title: "Ready", tone: "tone-blue" },
+  { status: "running", title: "Running", tone: "tone-blue" },
+  { status: "review", title: "Review", tone: "tone-amber" },
+  { status: "blocked", title: "Blocked", tone: "tone-amber" },
+  { status: "scheduled", title: "Scheduled", tone: "tone-slate" },
   { status: "done", title: "Done", tone: "tone-green" },
 ];
 
 type SortMode = "manual" | "updated" | "title" | "progress";
-type GroupMode = "status" | "assignee" | "tag";
+type GroupMode = "status" | "assignee" | "tag" | "project";
 
 export function KanbanWall({
   selectedCard,
@@ -94,6 +98,7 @@ export function KanbanWall({
             <option value="status">Group: Status</option>
             <option value="assignee">Group: Assignee</option>
             <option value="tag">Group: Tag</option>
+            <option value="project">Group: Project</option>
           </select>
           <select
             className="sort-select"
@@ -153,7 +158,7 @@ interface ColumnDef {
   cards: Card[];
 }
 
-function buildColumns(group: "status" | "assignee" | "tag", cards: Card[]): ColumnDef[] {
+function buildColumns(group: GroupMode, cards: Card[]): ColumnDef[] {
   if (group === "status") {
     return COLUMNS.map((c) => ({
       key: c.status,
@@ -163,8 +168,11 @@ function buildColumns(group: "status" | "assignee" | "tag", cards: Card[]): Colu
       cards: cards.filter((x) => x.status === c.status),
     }));
   }
-  const keyOf = (c: Card) =>
-    group === "assignee" ? (c.assignee ?? "unassigned") : (c.tags[0] ?? "untagged");
+  const keyOf = (c: Card) => {
+    if (group === "assignee") return c.assignee ?? "unassigned";
+    if (group === "project") return c.project ?? "No project";
+    return c.tags[0] ?? "untagged";
+  };
   const keys = [...new Set(cards.map(keyOf))].sort();
   return keys.map((k) => ({
     key: k,
@@ -217,7 +225,7 @@ function CardTile({
           </span>
         )}
       </div>
-      {card.status === "in_progress" && (
+      {card.status === "running" && (
         <div className="card-progress">
           <div className="progress-track">
             <div

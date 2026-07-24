@@ -25,14 +25,19 @@ export interface ColumnMapping {
 
 export const DEFAULT_MAPPING: ColumnMapping = {
   statusToOption: {
-    backlog: "Todo",
-    in_progress: "In Progress",
+    triage: "Todo",
+    todo: "Todo",
+    ready: "Todo",
+    running: "In Progress",
     review: "In Review",
+    blocked: "Todo",
+    scheduled: "Todo",
     done: "Done",
+    archived: "Done",
   },
   optionToStatus: {
-    Todo: "backlog",
-    "In Progress": "in_progress",
+    Todo: "todo",
+    "In Progress": "running",
     "In Review": "review",
     Done: "done",
   },

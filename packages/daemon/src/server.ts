@@ -458,7 +458,7 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
   app.post("/api/board/cards", async (req, reply) => {
     const b = (req.body ?? {}) as {
       title?: string; body?: string; status?: CardStatus; tags?: string[];
-      externalRef?: string; priority?: "low" | "medium" | "high" | "urgent"; milestone?: string;
+      externalRef?: string; priority?: "low" | "medium" | "high" | "urgent"; milestone?: string; project?: string | null;
     };
     if (!b.title) return reply.code(400).send({ error: "title required" });
     // Idempotent peer ingestion: same externalRef updates rather than duplicates.
@@ -469,6 +469,7 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
         if (b.body !== undefined) patch.body = b.body;
         if (b.status !== undefined) patch.status = b.status;
         if (b.tags !== undefined) patch.tags = b.tags;
+        if (b.project !== undefined) patch.project = b.project;
         const updated = board.update(existing.id, patch);
         if (updated) emitCard(updated);
         return reply.send({ card: updated });
@@ -476,7 +477,7 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     }
     const created: {
       title: string; body?: string; status?: CardStatus; tags?: string[];
-      externalRef?: string; priority?: "low" | "medium" | "high" | "urgent"; milestone?: string;
+      externalRef?: string; priority?: "low" | "medium" | "high" | "urgent"; milestone?: string; project?: string | null;
     } = { title: b.title };
     if (b.body !== undefined) created.body = b.body;
     if (b.status !== undefined) created.status = b.status;
@@ -484,6 +485,7 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     if (b.externalRef !== undefined) created.externalRef = b.externalRef;
     if (b.priority !== undefined) created.priority = b.priority;
     if (b.milestone !== undefined) created.milestone = b.milestone;
+    if (b.project !== undefined) created.project = b.project;
     const card = board.create(created);
     emitCard(card);
     return reply.send({ card });
@@ -510,7 +512,7 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     if (!card) return reply.code(404).send({ error: "not found" });
     const updated = board.update(id, {
       assignee: b.agentId ?? card.assignee,
-      status: card.status === "backlog" ? "in_progress" : card.status,
+      status: ["triage", "todo", "ready"].includes(card.status) ? "running" : card.status,
     });
     if (updated) emitCard(updated);
     let session = null;
@@ -999,7 +1001,7 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
         uptimeMs: Date.now() - startedAt,
         agentsOnline: agents.filter((a) => a.status !== "offline").length,
         agentsTotal: agents.length,
-        tasksPending: cards.filter((c) => c.status === "backlog" || c.status === "in_progress").length,
+        tasksPending: cards.filter((c) => ["triage", "todo", "ready", "running"].includes(c.status)).length,
         tasksTotal: cards.length,
         eventsLogged: log.recent().length,
         sessionsRunning: sessions.list().filter((s) => s.status === "running").length,

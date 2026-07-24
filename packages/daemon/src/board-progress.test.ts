@@ -19,13 +19,13 @@ function setup() {
   const board = new Board(":memory:");
   const emitted: Card[] = [];
   const bp = new BoardProgress(board, (c) => emitted.push(c));
-  const card = board.create({ title: "Ship it", status: "in_progress" });
+  const card = board.create({ title: "Ship it", status: "running" });
   board.update(card.id, { assignee: "blue-1" });
   return { board, bp, card, emitted };
 }
 
 describe("BoardProgress", () => {
-  it("tool.use creeps progress on the assigned in_progress card", () => {
+  it("tool.use creeps progress on the assigned running card", () => {
     const { board, bp, card, emitted } = setup();
     for (let i = 0; i < 5; i++) bp.apply(ev({ type: "tool.use" }));
     const now = board.get(card.id)!;
@@ -87,13 +87,13 @@ describe("BoardProgress", () => {
     expect(board.get(card.id)!.sessionId).toBeNull();
   });
 
-  it("ignores agents with no assigned card and cards not in_progress", () => {
+  it("ignores agents with no assigned card and cards not running", () => {
     const { board, bp, emitted } = setup();
-    const backlog = board.create({ title: "Later" });
-    board.update(backlog.id, { assignee: "green-2" });
-    bp.apply(ev({ agentId: "green-2" })); // card is backlog, not in_progress
+    const todo = board.create({ title: "Later" });
+    board.update(todo.id, { assignee: "green-2" });
+    bp.apply(ev({ agentId: "green-2" })); // card is todo, not running
     bp.apply(ev({ agentId: "nobody" }));
-    expect(board.get(backlog.id)!.progress).toBe(0);
+    expect(board.get(todo.id)!.progress).toBe(0);
     expect(emitted.every((c) => c.assignee === "blue-1")).toBe(true);
     board.close();
   });

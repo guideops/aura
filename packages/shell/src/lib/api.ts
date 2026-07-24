@@ -11,7 +11,7 @@ export const api = {
   async listCards(): Promise<Card[]> {
     return (await json<{ cards: Card[] }>(await fetch("/api/board/cards"))).cards;
   },
-  async createCard(input: { title: string; body?: string; tags?: string[]; status?: CardStatus }): Promise<Card> {
+  async createCard(input: { title: string; body?: string; tags?: string[]; status?: CardStatus; project?: string | null }): Promise<Card> {
     return (await json<{ card: Card }>(await fetch("/api/board/cards", {
       method: "POST",
       headers: { "content-type": "application/json" },

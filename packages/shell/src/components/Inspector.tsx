@@ -4,10 +4,15 @@ import { api } from "../lib/api";
 import { agentColor, useShell } from "../lib/store";
 
 const STATUS_LABEL: Record<CardStatus, string> = {
-  backlog: "To Do",
-  in_progress: "In Progress",
-  review: "In Review",
+  triage: "Triage",
+  todo: "Todo",
+  ready: "Ready",
+  running: "Running",
+  review: "Review",
+  blocked: "Blocked",
+  scheduled: "Scheduled",
   done: "Done",
+  archived: "Archived",
 };
 
 type CardExt = Card & {
@@ -88,6 +93,21 @@ export function Inspector({
           <dd>
             <i className="avatar-dot" style={{ background: agentColor(card.assignee) }} />
             {card.assignee ?? "unassigned"}
+          </dd>
+          <dt>Progress</dt>
+          <dd>{card.progress}%</dd>
+          <dt>Project</dt>
+          <dd>
+            <input
+              key={`${card.id}-${card.project ?? ""}`}
+              type="text"
+              defaultValue={card.project ?? ""}
+              placeholder="No project"
+              onBlur={(e) => {
+                const project = e.target.value.trim() || null;
+                if (project !== card.project) void api.patchCard(card.id, { project });
+              }}
+            />
           </dd>
           <dt>Labels</dt>
           <dd className="card-tags">

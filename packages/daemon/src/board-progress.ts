@@ -3,7 +3,7 @@ import type { Board } from "./board.js";
 
 /**
  * Drives card progress from the agent event stream. Cards link to agents via
- * `assignee`; while a card is in_progress, its agent's activity animates the
+ * `assignee`; while a card is running, its agent's activity animates the
  * progress bar (heuristic — real completion signal is session.end → review).
  */
 export class BoardProgress {
@@ -33,8 +33,8 @@ export class BoardProgress {
     // sessions not spawned through the board.
     const cards = this.board.list();
     const card =
-      cards.find((c) => c.status === "in_progress" && c.sessionId === event.sessionId) ??
-      cards.find((c) => c.status === "in_progress" && c.assignee === event.agentId);
+      cards.find((c) => c.status === "running" && c.sessionId === event.sessionId) ??
+      cards.find((c) => c.status === "running" && c.assignee === event.agentId);
     if (!card) return;
 
     if (event.type === "session.end") {

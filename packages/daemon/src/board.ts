@@ -11,6 +11,7 @@ export interface CreateCardInput {
   externalRef?: string;
   priority?: CardPriority;
   milestone?: string;
+  project?: string | null;
 }
 
 /**
@@ -49,7 +50,9 @@ export class Board {
     try { this.db.exec("ALTER TABLE cards ADD COLUMN external_ref TEXT"); } catch { /* exists */ }
     try { this.db.exec("ALTER TABLE cards ADD COLUMN priority TEXT NOT NULL DEFAULT 'medium'"); } catch { /* exists */ }
     try { this.db.exec("ALTER TABLE cards ADD COLUMN milestone TEXT"); } catch { /* exists */ }
+    try { this.db.exec("ALTER TABLE cards ADD COLUMN project TEXT"); } catch { /* exists */ }
     try { this.db.exec("ALTER TABLE cards ADD COLUMN checklist TEXT NOT NULL DEFAULT '[]'"); } catch { /* exists */ }
+    this.db.exec("UPDATE cards SET status='todo' WHERE status='backlog'; UPDATE cards SET status='running' WHERE status='in_progress';");
     const maxKey = this.db
       .prepare("SELECT key FROM cards WHERE key LIKE 'AURA-%' ORDER BY CAST(SUBSTR(key,6) AS INTEGER) DESC LIMIT 1")
       .get() as { key: string } | undefined;
@@ -79,7 +82,7 @@ export class Board {
       key: input.key ?? `AURA-${++this.counter}`,
       title: input.title,
       body: input.body ?? "",
-      status: input.status ?? "backlog",
+      status: input.status ?? "todo",
       tags: input.tags ?? [],
       assignee: null,
       progress: 0,
@@ -87,6 +90,7 @@ export class Board {
       externalRef: input.externalRef ?? null,
       priority: input.priority ?? "medium",
       milestone: input.milestone ?? null,
+      project: input.project ?? null,
       checklist: [],
       sessionId: null,
       rev: 0,
@@ -125,13 +129,13 @@ export class Board {
   private insert(card: Card): void {
     this.db
       .prepare(
-        `INSERT INTO cards (id, key, title, body, status, tags, assignee, progress, external_id, external_ref, priority, milestone, checklist, session_id, rev, updated_at)
-         VALUES (@id, @key, @title, @body, @status, @tags, @assignee, @progress, @externalId, @externalRef, @priority, @milestone, @checklist, @sessionId, @rev, @updatedAt)
+        `INSERT INTO cards (id, key, title, body, status, tags, assignee, progress, external_id, external_ref, priority, milestone, project, checklist, session_id, rev, updated_at)
+         VALUES (@id, @key, @title, @body, @status, @tags, @assignee, @progress, @externalId, @externalRef, @priority, @milestone, @project, @checklist, @sessionId, @rev, @updatedAt)
          ON CONFLICT(id) DO UPDATE SET
            key=excluded.key, title=excluded.title, body=excluded.body, status=excluded.status,
            tags=excluded.tags, assignee=excluded.assignee, progress=excluded.progress,
            external_id=excluded.external_id, external_ref=excluded.external_ref, priority=excluded.priority,
-           milestone=excluded.milestone, checklist=excluded.checklist,
+           milestone=excluded.milestone, project=excluded.project, checklist=excluded.checklist,
            session_id=excluded.session_id, rev=excluded.rev, updated_at=excluded.updated_at`,
       )
       .run({ ...card, tags: JSON.stringify(card.tags), checklist: JSON.stringify(card.checklist) });
@@ -142,7 +146,7 @@ interface RawCard {
   id: string; key: string; title: string; body: string; status: string;
   tags: string; assignee: string | null; progress: number;
   external_id: string | null; external_ref: string | null; priority: string;
-  milestone: string | null; checklist: string;
+  milestone: string | null; project: string | null; checklist: string;
   session_id: string | null; rev: number; updated_at: number;
 }
 
@@ -151,7 +155,7 @@ function hydrate(r: RawCard): Card {
     id: r.id, key: r.key, title: r.title, body: r.body, status: r.status,
     tags: JSON.parse(r.tags) as string[], assignee: r.assignee, progress: r.progress,
     externalId: r.external_id, externalRef: r.external_ref, priority: r.priority,
-    milestone: r.milestone, checklist: JSON.parse(r.checklist || "[]") as unknown[],
+    milestone: r.milestone, project: r.project, checklist: JSON.parse(r.checklist || "[]") as unknown[],
     sessionId: r.session_id, rev: r.rev, updatedAt: r.updated_at,
   });
 }

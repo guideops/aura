@@ -14,7 +14,7 @@
   header .grow { flex:1; }
   header input { border:1px solid var(--line); border-radius:8px; padding:6px 10px; font:inherit; width:240px; }
   header button { border:0; background:#2563eb; color:#fff; border-radius:8px; padding:7px 14px; font-weight:600; cursor:pointer; }
-  main { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; padding:16px; align-items:start; }
+  main { display:grid; grid-template-columns:repeat(8,1fr); gap:14px; padding:16px; align-items:start; }
   .col { background:#eef1f5; border:1px solid var(--line); border-radius:12px; padding:10px; min-height:200px; }
   .col.drop { outline:2px dashed #2563eb; outline-offset:-4px; }
   .col h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); margin:2px 4px 10px; display:flex; justify-content:space-between; }
@@ -78,9 +78,13 @@
 </dialog>
 <script type="module">
 const COLS = [
-  { status: "backlog", title: "Backlog" },
-  { status: "in_progress", title: "In Progress" },
+  { status: "triage", title: "Triage" },
+  { status: "todo", title: "Todo" },
+  { status: "ready", title: "Ready" },
+  { status: "running", title: "Running" },
   { status: "review", title: "Review" },
+  { status: "blocked", title: "Blocked" },
+  { status: "scheduled", title: "Scheduled" },
   { status: "done", title: "Done" },
 ];
 const AGENT_COLORS = { blue:"#3b82f6", green:"#22c55e", orange:"#f97316", purple:"#8b5cf6", red:"#ef4444", yellow:"#eab308" };

@@ -6,7 +6,17 @@ import { z } from "zod";
  * maps to a Projects single-select option via a column↔status mapping, and
  * `externalId` links the card to its GitHub item.
  */
-export const CardStatus = z.enum(["backlog", "in_progress", "review", "done"]);
+export const CardStatus = z.enum([
+  "triage",
+  "todo",
+  "ready",
+  "running",
+  "review",
+  "blocked",
+  "scheduled",
+  "done",
+  "archived",
+]);
 export type CardStatus = z.infer<typeof CardStatus>;
 
 export const CardPriority = z.enum(["low", "medium", "high", "urgent"]);
@@ -33,6 +43,7 @@ export const Card = z.object({
   externalRef: z.string().nullable().default(null),
   priority: CardPriority.default("medium"),
   milestone: z.string().nullable().default(null),
+  project: z.string().nullable().default(null),
   checklist: z.array(ChecklistItem).default([]),
   /** Provider session bound to this card (set when a spawned session starts). */
   sessionId: z.string().nullable().default(null),
@@ -49,9 +60,13 @@ export const Column = z.object({
 export type Column = z.infer<typeof Column>;
 
 export const DEFAULT_COLUMNS: Column[] = [
-  { status: "backlog", title: "Backlog" },
-  { status: "in_progress", title: "In Progress" },
+  { status: "triage", title: "Triage" },
+  { status: "todo", title: "Todo" },
+  { status: "ready", title: "Ready" },
+  { status: "running", title: "Running" },
   { status: "review", title: "Review" },
+  { status: "blocked", title: "Blocked" },
+  { status: "scheduled", title: "Scheduled" },
   { status: "done", title: "Done" },
 ];
 

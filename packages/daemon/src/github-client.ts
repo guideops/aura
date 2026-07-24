@@ -81,7 +81,7 @@ export class OctokitProjectClient implements GitHubProjectClient {
       for (const node of conn.nodes) {
         const statusVal = node.fieldValues.nodes.find((v: any) => v?.field?.name === "Status");
         const optionName = statusVal ? sf.nameByOptionId.get(statusVal.optionId) : undefined;
-        const status = (optionName && this.mapping.optionToStatus[optionName]) || "backlog";
+        const status = (optionName && this.mapping.optionToStatus[optionName]) || "todo";
         items.push({ externalId: node.id, title: node.content?.title ?? "(untitled)", status });
       }
       cursor = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null;

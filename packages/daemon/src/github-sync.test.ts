@@ -11,7 +11,7 @@ import type { Card, CardStatus } from "@aura/core";
 
 function card(over: Partial<Card>): Card {
   return {
-    id: "c1", key: "AURA-201", title: "t", body: "", status: "backlog",
+    id: "c1", key: "AURA-201", title: "t", body: "", status: "todo",
     tags: [], assignee: null, progress: 0, externalId: null, rev: 0,
     updatedAt: 0, ...over,
   };
@@ -20,28 +20,28 @@ function card(over: Partial<Card>): Card {
 describe("reconcile (pure conflict logic)", () => {
   it("creates a remote for a new local card with no externalId", () => {
     const { ops } = reconcile([card({ id: "c1" })], [], []);
-    expect(ops).toEqual([{ type: "create-remote", cardId: "c1", title: "t", status: "backlog" }]);
+    expect(ops).toEqual([{ type: "create-remote", cardId: "c1", title: "t", status: "todo" }]);
   });
 
   it("imports a remote item with no local card", () => {
-    const remote: RemoteItem = { externalId: "PVTI_1", title: "remote task", status: "in_progress" };
+    const remote: RemoteItem = { externalId: "PVTI_1", title: "remote task", status: "running" };
     const { ops } = reconcile([], [remote], []);
-    expect(ops).toEqual([{ type: "create-local", externalId: "PVTI_1", title: "remote task", status: "in_progress" }]);
+    expect(ops).toEqual([{ type: "create-local", externalId: "PVTI_1", title: "remote task", status: "running" }]);
   });
 
   it("pushes when only local changed", () => {
     const c = card({ id: "c1", externalId: "PVTI_1", status: "done", rev: 3 });
-    const remote: RemoteItem = { externalId: "PVTI_1", title: "t", status: "in_progress" };
-    const state: SyncState = { cardId: "c1", externalId: "PVTI_1", lastSyncedRev: 2, lastRemoteStatus: "in_progress" };
+    const remote: RemoteItem = { externalId: "PVTI_1", title: "t", status: "running" };
+    const state: SyncState = { cardId: "c1", externalId: "PVTI_1", lastSyncedRev: 2, lastRemoteStatus: "running" };
     const { ops, conflicts } = reconcile([c], [remote], [state]);
     expect(conflicts).toHaveLength(0);
     expect(ops).toEqual([{ type: "push", cardId: "c1", externalId: "PVTI_1", status: "done" }]);
   });
 
   it("pulls when only remote changed", () => {
-    const c = card({ id: "c1", externalId: "PVTI_1", status: "in_progress", rev: 2 });
+    const c = card({ id: "c1", externalId: "PVTI_1", status: "running", rev: 2 });
     const remote: RemoteItem = { externalId: "PVTI_1", title: "t", status: "done" };
-    const state: SyncState = { cardId: "c1", externalId: "PVTI_1", lastSyncedRev: 2, lastRemoteStatus: "in_progress" };
+    const state: SyncState = { cardId: "c1", externalId: "PVTI_1", lastSyncedRev: 2, lastRemoteStatus: "running" };
     const { ops, conflicts } = reconcile([c], [remote], [state]);
     expect(conflicts).toHaveLength(0);
     expect(ops).toEqual([{ type: "pull", cardId: "c1", status: "done" }]);
@@ -51,7 +51,7 @@ describe("reconcile (pure conflict logic)", () => {
     // both sides moved the card to different columns since last sync
     const c = card({ id: "c1", externalId: "PVTI_1", status: "done", rev: 5 });
     const remote: RemoteItem = { externalId: "PVTI_1", title: "t", status: "review" };
-    const state: SyncState = { cardId: "c1", externalId: "PVTI_1", lastSyncedRev: 4, lastRemoteStatus: "in_progress" };
+    const state: SyncState = { cardId: "c1", externalId: "PVTI_1", lastSyncedRev: 4, lastRemoteStatus: "running" };
     const { ops, conflicts } = reconcile([c], [remote], [state]);
     expect(conflicts).toEqual([
       { cardId: "c1", externalId: "PVTI_1", localStatus: "done", remoteStatus: "review", resolution: "remote-wins" },
@@ -70,10 +70,10 @@ describe("reconcile (pure conflict logic)", () => {
   });
 
   it("re-creates a remote that was deleted on GitHub", () => {
-    const c = card({ id: "c1", externalId: "PVTI_gone", status: "backlog", rev: 1 });
-    const state: SyncState = { cardId: "c1", externalId: "PVTI_gone", lastSyncedRev: 1, lastRemoteStatus: "backlog" };
+    const c = card({ id: "c1", externalId: "PVTI_gone", status: "todo", rev: 1 });
+    const state: SyncState = { cardId: "c1", externalId: "PVTI_gone", lastSyncedRev: 1, lastRemoteStatus: "todo" };
     const { ops } = reconcile([c], [], [state]);
-    expect(ops).toEqual([{ type: "create-remote", cardId: "c1", title: "t", status: "backlog" }]);
+    expect(ops).toEqual([{ type: "create-remote", cardId: "c1", title: "t", status: "todo" }]);
   });
 });
 
@@ -102,14 +102,14 @@ describe("SyncEngine (stateful, mocked transport)", () => {
   beforeEach(() => { board = new Board(":memory:"); });
 
   it("pushes a new local card to GitHub and links it", async () => {
-    const c = board.create({ title: "Ship sync", status: "in_progress" });
+    const c = board.create({ title: "Ship sync", status: "running" });
     const client = new MockClient();
     const engine = new SyncEngine(board, client, ":memory:");
     const r = await engine.syncOnce();
     expect(r.applied).toBe(1);
     const linked = board.get(c.id)!;
     expect(linked.externalId).toMatch(/^PVTI_/);
-    expect((await client.listItems())[0]).toMatchObject({ title: "Ship sync", status: "in_progress" });
+    expect((await client.listItems())[0]).toMatchObject({ title: "Ship sync", status: "running" });
     engine.close();
   });
 
@@ -124,8 +124,8 @@ describe("SyncEngine (stateful, mocked transport)", () => {
   });
 
   it("resumes after an API failure with no duplicate items (chaos)", async () => {
-    board.create({ title: "A", status: "backlog" });
-    board.create({ title: "B", status: "backlog" });
+    board.create({ title: "A", status: "todo" });
+    board.create({ title: "B", status: "todo" });
     const client = new MockClient();
     client.failNext = 1; // first createItem throws
     const engine = new SyncEngine(board, client, ":memory:");
@@ -142,9 +142,9 @@ describe("SyncEngine (stateful, mocked transport)", () => {
 
   it("converges over a 2-way soak without dupes or losses", async () => {
     // seed 3 local + 2 remote
-    const locals = ["L1", "L2", "L3"].map((t) => board.create({ title: t, status: "backlog" }));
+    const locals = ["L1", "L2", "L3"].map((t) => board.create({ title: t, status: "todo" }));
     const client = new MockClient([
-      { externalId: "PVTI_r1", title: "R1", status: "in_progress" },
+      { externalId: "PVTI_r1", title: "R1", status: "running" },
       { externalId: "PVTI_r2", title: "R2", status: "done" },
     ]);
     const engine = new SyncEngine(board, client, ":memory:");

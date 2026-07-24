@@ -42,10 +42,15 @@ let state: ShellState = {
 };
 
 const STATUS_LABEL: Record<string, string> = {
-  backlog: "To Do",
-  in_progress: "In Progress",
-  review: "In Review",
+  triage: "Triage",
+  todo: "Todo",
+  ready: "Ready",
+  running: "Running",
+  review: "Review",
+  blocked: "Blocked",
+  scheduled: "Scheduled",
   done: "Done",
+  archived: "Archived",
 };
 
 function recordCardActivity(prev: Card | undefined, next: Card) {
