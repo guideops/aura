@@ -14,6 +14,8 @@ import { BottomPanel } from "./components/BottomPanel";
 import { StatusBar } from "./components/StatusBar";
 import { ActionRequestModal } from "./components/ActionRequestModal";
 import { CommandPalette } from "./components/CommandPalette";
+import { MobileShell } from "./components/MobileShell";
+import { useMobileMode } from "./lib/mobile";
 import { startWs } from "./lib/store";
 import type { ZoneContext } from "./lib/zones";
 
@@ -30,6 +32,7 @@ export function App() {
   const [theme, setTheme] = useState<"light" | "dark">(() =>
     localStorage.getItem("aura-theme") === "dark" ? "dark" : "light",
   );
+  const mobile = useMobileMode();
 
   // Writing localStorage also fires "storage" in the same-origin office
   // iframes, which restyle their 3D scene to match.
@@ -95,6 +98,26 @@ export function App() {
     window.dispatchEvent(new CustomEvent("aura:new-card"));
   }, []);
 
+  // Phone-sized viewports auto-start the simple view: full-screen content,
+  // a FAB view switcher, and a swipe-up drawer instead of the desktop chrome.
+  if (mobile.simple) {
+    return (
+      <>
+        <MobileShell
+          tab={tab}
+          onSelectTab={setTab}
+          selectedCard={selectedCard}
+          onSelectCard={setSelectedCard}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+          onNewCard={newCard}
+          onExitSimple={() => mobile.setMode("full")}
+        />
+        <ActionRequestModal />
+      </>
+    );
+  }
+
   return (
     <div className="shell">
       <TopBar
@@ -108,6 +131,7 @@ export function App() {
         onToggleRight={toggleRight}
         theme={theme}
         onToggleTheme={toggleTheme}
+        onSimpleView={mobile.isNarrow ? () => mobile.setMode("simple") : undefined}
       />
       <div className="shell-main">
         <ActivityBar view={view} onSelect={setView} onOpenTab={setTab} onOpenPalette={() => setPaletteOpen(true)} />

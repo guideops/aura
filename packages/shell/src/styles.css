@@ -582,6 +582,104 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 .wb-activity-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-activity-ts { color: var(--text-faint); font-size: 10px; flex-shrink: 0; }
 
+/* ---------- Mobile simple view ---------- */
+.m-shell {
+  display: flex; flex-direction: column; height: 100%;
+  padding-top: env(safe-area-inset-top, 0px);
+  background: var(--bg-panel);
+}
+.m-topbar {
+  display: flex; align-items: center; gap: 10px;
+  height: 42px; padding: 0 12px; flex: none;
+  background: var(--bg-panel); border-bottom: 1px solid var(--border);
+}
+.m-view-label { flex: 1; text-align: center; font-weight: 600; color: var(--text-dim); }
+.m-body { flex: 1; min-height: 0; background: var(--bg-panel); }
+.m-body > * { height: 100%; }
+
+/* Floating action button + view switcher menu */
+.m-fab {
+  position: fixed; right: 16px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 42px);
+  width: 52px; height: 52px; border-radius: 50%;
+  background: var(--accent); color: #fff; font-size: 22px; line-height: 1;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25); z-index: 30;
+}
+.m-fab-scrim { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.3); z-index: 28; }
+.m-fab-menu {
+  position: fixed; right: 16px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 104px);
+  display: none; flex-direction: column; align-items: stretch; gap: 6px; z-index: 29;
+}
+.m-fab-menu.open { display: flex; }
+.m-fab-item {
+  display: flex; align-items: center; gap: 10px; text-align: left;
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px;
+  padding: 11px 16px; font-weight: 600;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+.m-fab-icon { width: 20px; text-align: center; }
+.m-fab-exit { color: var(--text-dim); }
+
+/* Bottom drawer (Explorer et al.) */
+.m-drawer {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 32;
+  background: var(--bg-panel); border-top: 1px solid var(--border);
+  border-radius: 14px 14px 0 0;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  display: flex; flex-direction: column;
+  box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.08);
+}
+.m-drawer.open { height: 62vh; }
+.m-drawer-handle {
+  padding: 9px 0 11px; display: flex; justify-content: center;
+  cursor: pointer; touch-action: none; flex: none;
+}
+.m-drawer-grip { width: 42px; height: 4px; border-radius: 2px; background: var(--text-faint); }
+.m-drawer-tabs { display: flex; gap: 6px; padding: 0 12px 8px; flex: none; }
+.m-drawer-tab {
+  flex: 1; padding: 8px 0; border-radius: 8px;
+  background: var(--bg-inset); font-weight: 600; color: var(--text-dim);
+}
+.m-drawer-tab.active { background: var(--accent-soft); color: var(--accent); }
+.m-drawer-body { flex: 1; min-height: 0; overflow-y: auto; }
+.m-drawer-body .sidebar { height: 100%; border-right: none; }
+
+/* Escape hatch in the top bar, shown only on narrow viewports */
+.m-return { background: var(--accent-soft); }
+
+/* Card detail bottom sheet */
+.m-sheet-scrim { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.3); z-index: 33; }
+.m-card-sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 34;
+  height: 76vh;
+  background: var(--bg-panel); border-top: 1px solid var(--border);
+  border-radius: 14px 14px 0 0;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  display: flex; flex-direction: column;
+  box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.12);
+}
+.m-card-sheet-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.m-card-sheet-body .inspector { flex: 1; min-height: 0; }
+[data-theme="dark"] .m-sheet-scrim { background: rgba(0, 0, 0, 0.45); }
+[data-theme="dark"] .m-card-sheet { box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.5); }
+
+/* Touch-friendly tweaks for views rendered inside the simple shell */
+.m-shell .kanban-toolbar { flex-wrap: wrap; gap: 8px; padding: 8px 10px; }
+.m-shell .kanban-actions { flex-wrap: wrap; width: 100%; }
+.m-shell .filter-input { flex: 1; min-width: 90px; }
+.m-shell .kanban-columns {
+  scroll-snap-type: x mandatory; gap: 10px; padding: 10px;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 34px);
+}
+.m-shell .kanban-col { min-width: 84vw; scroll-snap-align: center; }
+.m-shell .card-tile { padding: 12px 14px; }
+.m-shell .wb-toolbar { flex-wrap: wrap; row-gap: 6px; }
+.m-shell .modal { width: min(380px, calc(100vw - 32px)); }
+
+[data-theme="dark"] .m-fab-scrim { background: rgba(0, 0, 0, 0.45); }
+[data-theme="dark"] .m-drawer { box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.5); }
+
 /* ---------- Dark theme ---------- */
 :root[data-theme="dark"] {
   color-scheme: dark;

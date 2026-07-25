@@ -52,6 +52,7 @@ export function TopBar({
   onToggleRight,
   theme,
   onToggleTheme,
+  onSimpleView,
 }: {
   onOpenPalette: () => void;
   onNewCard: () => void;
@@ -63,6 +64,8 @@ export function TopBar({
   onToggleRight: () => void;
   theme: "light" | "dark";
   onToggleTheme: () => void;
+  /** Shown on narrow viewports: switch back to the mobile simple view. */
+  onSimpleView?: (() => void) | undefined;
 }) {
   const [briefState, setBriefState] = useState<"idle" | "busy" | "done">("idle");
 
@@ -95,6 +98,11 @@ export function TopBar({
         </button>
       </div>
       <div className="topbar-right">
+        {onSimpleView && (
+          <button className="icon-btn m-return" title="Simple view" onClick={onSimpleView}>
+            📱
+          </button>
+        )}
         <button className="icon-btn" title="New card" onClick={onNewCard}>＋</button>
         <button className="icon-btn" title="Brief now — write agenda note to vault" onClick={() => void briefNow()}>
           {briefState === "busy" ? "…" : briefState === "done" ? "✓" : "🗎"}
