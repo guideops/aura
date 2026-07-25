@@ -7,7 +7,7 @@ dist/
 *.db-wal
 .env
 assets/raw/
-vault/briefs/
+**/vault/briefs/
 *.board.db
 *.board.db-*
 *.sync.db
@@ -16,5 +16,5 @@ office.space.json
 aura.peers.json
 aura.config.json
 packages/daemon/public/shell/
-vault/boards/
-vault/docs/
+**/vault/boards/
+**/vault/docs/
