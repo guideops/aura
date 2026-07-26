@@ -1,0 +1,15 @@
+[Unit]
+Description=AURA daemon (agent office, kanban wall, vault) on 127.0.0.1:8311
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/aura
+ExecStart=/usr/local/bin/node packages/daemon/dist/cli.js
+Restart=on-failure
+RestartSec=5
+Environment=AURA_PORT=8311
+
+[Install]
+WantedBy=multi-user.target
