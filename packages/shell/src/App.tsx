@@ -39,6 +39,10 @@ export function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("aura-theme", theme);
+    // Keeps the installed PWA's status bar / task-switcher chrome in step.
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute("content", theme === "dark" ? "#0b0d12" : "#f6f7f9");
   }, [theme]);
   const toggleTheme = useCallback(
     () => setTheme((t) => (t === "dark" ? "light" : "dark")),

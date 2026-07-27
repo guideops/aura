@@ -12,3 +12,12 @@ createRoot(document.getElementById("root")!).render(
     <App />
   </StrictMode>,
 );
+
+// Registering a service worker is what makes the shell installable as a PWA
+// (and gives it an offline fallback). Dev builds skip it so Vite's HMR isn't
+// shadowed by a cached shell.
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    void navigator.serviceWorker.register("/shell/sw.js", { scope: "/shell/" });
+  });
+}
