@@ -1,12 +1,14 @@
 // AURA shell service worker.
 //
 // Deliberately dumb: no build-time precache manifest to keep in sync. Vite's
-// hashed asset filenames make cache-first safe for /shell/assets and /shell/icons,
-// while navigations stay network-first so a deploy is picked up on the next load
-// and the cached copy only serves as the offline fallback. API and websocket
-// traffic is never touched.
+// hashed asset filenames make cache-first safe for /shell/assets, while
+// navigations stay network-first so a deploy is picked up on the next load and
+// the cached copy only serves as the offline fallback. Icons keep stable names,
+// so they are stale-while-revalidate instead — a replaced icon self-heals on
+// the following load rather than sticking until the cache version changes.
+// API and websocket traffic is never touched.
 
-const CACHE = "aura-shell-v1";
+const CACHE = "aura-shell-v2";
 const SCOPE = new URL(self.registration.scope).pathname; // "/shell/"
 const OFFLINE_FALLBACK = SCOPE;
 
@@ -26,8 +28,37 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-function isImmutableAsset(url) {
-  return url.pathname.startsWith(`${SCOPE}assets/`) || url.pathname.startsWith(`${SCOPE}icons/`);
+const isHashedAsset = (url) => url.pathname.startsWith(`${SCOPE}assets/`);
+const isIcon = (url) => url.pathname.startsWith(`${SCOPE}icons/`);
+
+function cacheFirst(request) {
+  return caches.match(request).then(
+    (hit) =>
+      hit ??
+      fetch(request).then((response) => {
+        if (response.ok) {
+          const copy = response.clone();
+          void caches.open(CACHE).then((cache) => cache.put(request, copy));
+        }
+        return response;
+      }),
+  );
+}
+
+function staleWhileRevalidate(request) {
+  return caches.match(request).then((hit) => {
+    const fresh = fetch(request)
+      .then((response) => {
+        if (response.ok) {
+          const copy = response.clone();
+          void caches.open(CACHE).then((cache) => cache.put(request, copy));
+        }
+        return response;
+      })
+      // Offline revalidation is expected to fail; the cached hit already served.
+      .catch(() => hit ?? Response.error());
+    return hit ?? fresh;
+  });
 }
 
 self.addEventListener("fetch", (event) => {
@@ -51,19 +82,6 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (!isImmutableAsset(url)) return;
-
-  event.respondWith(
-    caches.match(request).then(
-      (hit) =>
-        hit ??
-        fetch(request).then((response) => {
-          if (response.ok) {
-            const copy = response.clone();
-            void caches.open(CACHE).then((cache) => cache.put(request, copy));
-          }
-          return response;
-        }),
-    ),
-  );
+  if (isHashedAsset(url)) event.respondWith(cacheFirst(request));
+  else if (isIcon(url)) event.respondWith(staleWhileRevalidate(request));
 });
