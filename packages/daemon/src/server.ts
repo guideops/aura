@@ -5,7 +5,7 @@ import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import { ulid } from "ulid";
 import type { WebSocket } from "ws";
-import { AgentEvent, type ServerMessage, type Card, type CardStatus } from "@aura/core";
+import { AgentEvent, type ActionRequest, type ServerMessage, type Card, type CardStatus } from "@aura/core";
 import { normalizeHookEvent } from "@aura/adapter-claude-code";
 import { EventBus } from "./event-bus.js";
 import { AgentStateStore } from "./state-store.js";
@@ -13,6 +13,7 @@ import { EventLog } from "./persistence.js";
 import { GuardrailEngine } from "./guardrails.js";
 import { SessionManager, type EquippedSkill, type SessionManagerOptions } from "./session-manager.js";
 import { SpaceStore } from "./space-store.js";
+import { DeskAllocator, isWorking } from "./desks.js";
 import { SpaceFile } from "@aura/core";
 import { HermesSessionManager } from "./hermes-sessions.js";
 import { HermesClient } from "@aura/adapter-hermes";
@@ -50,6 +51,11 @@ export interface DaemonOptions {
   peersFile?: string;
   /** Operator config (chosen vault dir, ...); defaults to <cwd>/aura.config.json. */
   configFile?: string;
+  /**
+   * Path substrings whose sessions never spawn agents — automated session
+   * factories that would otherwise crowd out the work you care about.
+   */
+  ignoreProjects?: string[];
 }
 
 export interface Daemon {
@@ -97,8 +103,10 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     : ":memory:";
   const canvases = new CanvasStore(canvasDbPath);
   const skills = new SkillRegistry(options.skillsDir ?? path.join(process.cwd(), "skills"));
+  const space = new SpaceStore(options.spaceFile ?? path.join(process.cwd(), "office.space.json"));
   const sockets = new Set<WebSocket>();
   const hookSessions = new Set<string>();
+  const ignoreProjects = options.ignoreProjects ?? defaultIgnoreProjects();
 
   const broadcast = (msg: ServerMessage | BoardMessage | CanvasMessage) => {
     const text = JSON.stringify(msg);
@@ -138,25 +146,95 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
     broadcast({ kind: "card.upsert", card }),
   );
 
+  /**
+   * Close out observed requests using what actually happened, so an approval
+   * granted at Claude Code's own prompt isn't left sitting in AURA as a live
+   * question. A tool.result proves the call ran (⇒ approved); a session.end
+   * with nothing run means we never learned the answer (⇒ expired).
+   */
+  const mirrorOutcome = (event: AgentEvent) => {
+    let settled: ActionRequest[] = [];
+    if (event.type === "tool.result") {
+      const one = guardrails.mirror({
+        sessionId: event.sessionId,
+        tool: String(event.data["tool"] ?? ""),
+        inputPreview: String(event.data["inputPreview"] ?? ""),
+      });
+      if (one) settled = [one];
+    } else if (event.type === "session.end") {
+      settled = guardrails.abandonSession(event.sessionId);
+    }
+    for (const request of settled) {
+      broadcast({ kind: "approval.resolved", id: request.id, status: request.status });
+      bus.emit({
+        id: ulid(),
+        ts: Date.now(),
+        provider: event.provider,
+        sessionId: request.sessionId,
+        agentId: request.agentId,
+        type: "agent.status",
+        summary:
+          request.status === "approved"
+            ? `gate approved elsewhere — ${request.tool} ran`
+            : `gate unanswered — ${request.tool} never ran`,
+        data: { status: "active", mirrored: true, requestId: request.id },
+      });
+    }
+  };
+
+  const desks = new DeskAllocator(space, () => broadcast({ kind: "space.updated" }));
+
+  /**
+   * Despawns the bot for a finished session. One agent is one session, so when
+   * the session ends the colleague goes home — the office shows live work, not
+   * a museum of everyone who ever visited.
+   */
+  const despawn = (agentId: string) => {
+    if (!store.get(agentId)) return;
+    store.remove(agentId);
+    desks.release(agentId);
+    broadcast({ kind: "agent.removed", agentId });
+  };
+
   bus.subscribe((event) => {
     log.append(event);
     const snapshot = store.apply(event);
     boardProgress.apply(event);
     broadcast({ kind: "event", event });
-    if (snapshot) broadcast({ kind: "snapshot", agent: snapshot });
+    if (snapshot) {
+      // Seats follow status: claimed on starting work, surrendered on going
+      // idle, so a desk always means someone is at it right now.
+      const desk = isWorking(snapshot.status) ? desks.claim(snapshot.agentId) : null;
+      if (!desk) desks.release(snapshot.agentId);
+      snapshot.desk = desk;
+      broadcast({ kind: "snapshot", agent: snapshot });
+    }
+    if (event.type === "session.end") despawn(event.agentId);
+    mirrorOutcome(event);
   });
 
   // Staleness sweep: transcripts replay history, so old sessions arrive
   // "active". Demote quiet agents: idle after 5 min, offline after 30.
   const IDLE_MS = 5 * 60_000;
   const OFFLINE_MS = 30 * 60_000;
+  /** Observed requests whose session never reported an end (crash, kill -9). */
+  const OBSERVED_TTL_MS = 15 * 60_000;
   const sweep = setInterval(() => {
     const now = Date.now();
+    for (const request of guardrails.sweepStale(OBSERVED_TTL_MS, now)) {
+      broadcast({ kind: "approval.resolved", id: request.id, status: request.status });
+    }
     for (const agent of store.list()) {
-      if (agent.lastEventAt === null || agent.status === "offline") continue;
+      if (agent.lastEventAt === null) continue;
       const quiet = now - agent.lastEventAt;
-      const next = quiet > OFFLINE_MS ? "offline" : quiet > IDLE_MS ? "idle" : null;
-      if (next && agent.status !== next && agent.status !== "blocked") {
+      // Not every session gets to say goodbye (crash, closed terminal, kill).
+      // Long silence is treated as a session that ended, so the bot is retired
+      // rather than left standing around as a permanently "offline" colleague.
+      if (quiet > OFFLINE_MS) {
+        despawn(agent.agentId);
+        continue;
+      }
+      if (quiet > IDLE_MS && agent.status !== "idle" && agent.status !== "blocked") {
         bus.emit({
           id: ulid(),
           ts: now,
@@ -164,8 +242,8 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
           sessionId: agent.sessionId,
           agentId: agent.agentId,
           type: "agent.status",
-          summary: `agent.${next} — no activity ${Math.round(quiet / 60_000)}m`,
-          data: { status: next, synthetic: true },
+          summary: `agent.idle — no activity ${Math.round(quiet / 60_000)}m`,
+          data: { status: "idle", synthetic: true },
         });
       }
     }
@@ -207,6 +285,10 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
   app.post("/api/hooks/:provider", async (req, reply) => {
     const { provider } = req.params as { provider: string };
     if (provider === "claude-code") {
+      const cwd = (req.body as { cwd?: unknown } | null)?.cwd;
+      if (typeof cwd === "string" && ignoreProjects.some((n) => cwd.includes(n))) {
+        return reply.send({});
+      }
       const event = normalizeHookEvent(req.body, store);
       if (event) {
         hookSessions.add(event.sessionId);
@@ -938,7 +1020,6 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
   });
 
   // ---- Space CAD (office layout) ----
-  const space = new SpaceStore(options.spaceFile ?? path.join(process.cwd(), "office.space.json"));
   app.get("/api/space", async () => space.load());
   app.put("/api/space", async (req, reply) => {
     const parsed = SpaceFile.safeParse(req.body);
@@ -1017,7 +1098,10 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
         tasksTotal: cards.length,
         eventsLogged: log.recent().length,
         sessionsRunning: sessions.list().filter((s) => s.status === "running").length,
-        approvalsPending: guardrails.pendingRequests.length,
+        // Only owned requests count: observed ones settle themselves and are
+        // never something the operator has to act on.
+        approvalsPending: guardrails.blockingRequests.length,
+        approvalsObserved: guardrails.pendingRequests.length - guardrails.blockingRequests.length,
       },
       services: {
         daemon: { ok: true, version: SERVER_VERSION },
@@ -1033,13 +1117,25 @@ export function createDaemon(options: DaemonOptions = {}): Daemon {
         hermes: { ok: hermes.enabled, enabled: hermes.enabled },
       },
       git: { branch: await gitBranch() },
-      problems: guardrails.pendingRequests.length + reviewQueue.length,
+      problems: guardrails.blockingRequests.length + reviewQueue.length,
     };
   });
 
   app.addHook("onClose", async () => { stopSyncTimer(); canvasSync.close(); canvases.close(); vault.close(); board.close(); syncEngine?.close(); });
 
   return { app, bus, store, log, guardrails, get vault() { return vault; }, board, skills, hookSessions };
+}
+
+/**
+ * Sessions spawned by automation rather than by a person. claude-mem's observer
+ * alone opens ~14 a day, which would bury real work under machine traffic.
+ * Override with AURA_IGNORE_PROJECTS (comma-separated substrings); set it empty
+ * to ingest everything.
+ */
+export function defaultIgnoreProjects(): string[] {
+  const raw = process.env["AURA_IGNORE_PROJECTS"];
+  if (raw === undefined) return ["claude-mem-observer"];
+  return raw.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
 export function defaultPublicDir(): string {

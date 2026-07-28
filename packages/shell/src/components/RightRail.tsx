@@ -128,7 +128,10 @@ export function SecurityOverview() {
       <div className="widget-body kv">
         <div className="kv-row"><span>Tool calls allowed</span><b>{allowed}</b></div>
         <div className="kv-row"><span>Blocked</span><b>{denied}</b></div>
-        <div className="kv-row"><span>Approvals pending</span><b>{approvals.length}</b></div>
+        <div className="kv-row">
+          <span>Approvals pending</span>
+          <b>{approvals.filter((a) => a.origin === "peer").length}</b>
+        </div>
         <div className="kv-row"><span>Errors today</span><b>{errors}</b></div>
         <div className="kv-row"><span>Events logged</span><b>{status?.orchestration.eventsLogged ?? "—"}</b></div>
       </div>

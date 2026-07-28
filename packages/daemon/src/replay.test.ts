@@ -47,17 +47,19 @@ describe("replay: claude-code fixture through daemon", () => {
       expect(res.statusCode).toBe(200);
     }
 
+    // One bot per session, named after the project it runs in. sess-bbb22222
+    // ends during the replay, and a finished session despawns rather than
+    // lingering as an offline colleague — so only the live one is left.
     const agents = daemon.store.list();
-    expect(agents).toHaveLength(2);
+    expect(agents).toHaveLength(1);
 
     const first = agents.find((a) => a.sessionId === "sess-aaa11111");
-    const second = agents.find((a) => a.sessionId === "sess-bbb22222");
-    expect(first?.agentId).toBe("blue-agent");
-    expect(second?.agentId).toBe("green-agent");
+    expect(first?.agentId).toBe("aura-1"); // cwd C:\work\aura
+    expect(agents.find((a) => a.sessionId === "sess-bbb22222")).toBeUndefined();
 
-    // Stop → idle; SessionEnd → offline
+    // Stop → idle, and an idle agent holds no desk.
     expect(first?.status).toBe("idle");
-    expect(second?.status).toBe("offline");
+    expect(first?.desk).toBeNull();
 
     // Event log persisted everything incl. the deny event
     const events = daemon.log.recent(100);

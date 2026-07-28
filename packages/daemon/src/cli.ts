@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { TranscriptWatcher } from "@aura/adapter-claude-code";
-import { createDaemon, defaultPublicDir } from "./server.js";
+import { createDaemon, defaultIgnoreProjects, defaultPublicDir } from "./server.js";
 import { writeBrief } from "./brief.js";
 
 const PORT = Number(process.env["AURA_PORT"] ?? 8311);
@@ -42,18 +42,38 @@ if (fs.existsSync(permissionsPath)) {
 }
 
 // Transcript fallback: observes sessions without hooks + token usage for all.
-const transcriptsRoot =
-  process.env["AURA_TRANSCRIPTS"] ?? path.join(os.homedir(), ".claude", "projects");
-if (process.env["AURA_WATCH"] !== "0" && fs.existsSync(transcriptsRoot)) {
-  const watcher = new TranscriptWatcher({
-    rootDir: transcriptsRoot,
-    emit: (event) => daemon.bus.emit(event),
-    ctx: daemon.store,
-    isHookLive: (sessionId) => daemon.hookSessions.has(sessionId),
-  });
-  watcher.start();
-  // eslint-disable-next-line no-console
-  console.log(`[aura] transcript watcher on ${transcriptsRoot}`);
+// AURA_TRANSCRIPTS takes a comma-separated list because a machine commonly has
+// more than one Claude Code account, and watching only one silently hides every
+// session run under the others.
+const transcriptRoots = (
+  process.env["AURA_TRANSCRIPTS"] ?? path.join(os.homedir(), ".claude", "projects")
+)
+  .split(",")
+  .map((p) => p.trim())
+  .filter(Boolean);
+const ignoreProjects = defaultIgnoreProjects();
+if (process.env["AURA_WATCH"] !== "0") {
+  for (const rootDir of transcriptRoots) {
+    if (!fs.existsSync(rootDir)) {
+      // eslint-disable-next-line no-console
+      console.warn(`[aura] transcript root missing, skipped: ${rootDir}`);
+      continue;
+    }
+    const watcher = new TranscriptWatcher({
+      rootDir,
+      emit: (event) => daemon.bus.emit(event),
+      ctx: daemon.store,
+      isHookLive: (sessionId) => daemon.hookSessions.has(sessionId),
+      ignore: ignoreProjects,
+    });
+    watcher.start();
+    // eslint-disable-next-line no-console
+    console.log(`[aura] transcript watcher on ${rootDir}`);
+  }
+  if (ignoreProjects.length) {
+    // eslint-disable-next-line no-console
+    console.log(`[aura] ignoring sessions matching: ${ignoreProjects.join(", ")}`);
+  }
 }
 
 // Morning brief: write once on boot, then daily. Memory compounds.

@@ -184,18 +184,35 @@ export function useShell<T>(selector: (s: ShellState) => T): T {
   );
 }
 
-/** Stable agent color mapping (matches the office robot palette). */
+/**
+ * Agent palette. Values and order are kept identical to the office scene's
+ * COLORS (office.html) because both hash a project name to the same index —
+ * drift here means a bot is one colour as a robot and another as text.
+ */
 export const AGENT_COLORS: Record<string, string> = {
   blue: "#3b82f6",
   green: "#22c55e",
-  orange: "#f59e0b",
-  purple: "#a855f7",
+  orange: "#f97316",
+  purple: "#8b5cf6",
   red: "#ef4444",
   yellow: "#eab308",
 };
 
+/** "agentic-workspace-3" → "agentic-workspace". Bots are named <project>-<n>. */
+export function projectOf(agentId: string | null | undefined): string {
+  return String(agentId ?? "").replace(/-\d+$/, "") || "agent";
+}
+
+/**
+ * Colour identifies the project, not the individual, so one repo's bots read as
+ * a team. Hashed rather than assigned in arrival order, so the colour survives a
+ * daemon restart — and matches the palette the office scene hashes with.
+ */
 export function agentColor(agentId: string | null | undefined): string {
   if (!agentId) return "#64748b";
-  const prefix = agentId.split("-")[0] ?? "";
-  return AGENT_COLORS[prefix] ?? "#64748b";
+  const palette = Object.values(AGENT_COLORS);
+  const project = projectOf(agentId);
+  let hash = 0;
+  for (let i = 0; i < project.length; i++) hash = (hash * 31 + project.charCodeAt(i)) >>> 0;
+  return palette[hash % palette.length] ?? "#64748b";
 }

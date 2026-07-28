@@ -11,6 +11,16 @@
          border:1px solid #dde3ea; border-radius:10px; padding:10px 14px; min-width:180px; }
   #hud b { letter-spacing:.12em; }
   #hud .dim { color:#68758a; font-size:11px; }
+  /* Project filter. Unlike #hud this survives embed mode: the whole point is
+     to calm a crowded floor, and the floor is busiest inside the shell. */
+  #filterbar { position:fixed; left:12px; bottom:12px; display:none; gap:6px; flex-wrap:wrap;
+               max-width:60vw; background:#fffc; backdrop-filter:blur(8px);
+               border:1px solid #dde3ea; border-radius:10px; padding:8px 10px; }
+  #filterbar .chip { border:1px solid #dde3ea; background:#fff; border-radius:999px; cursor:pointer;
+                     padding:3px 10px; font:inherit; font-size:12px; color:#3a4453; }
+  #filterbar .chip:hover { background:#f3f6fa; }
+  #filterbar .chip.on { background:#3b82f6; border-color:#3b82f6; color:#fff; }
+  #filterbar .chip .n { opacity:.65; margin-left:5px; font-variant-numeric:tabular-nums; }
   #panel { position:fixed; top:12px; right:12px; width:250px; background:#fffc; backdrop-filter:blur(8px);
            border:1px solid #dde3ea; border-radius:10px; padding:12px 14px; display:none; }
   #panel h3 { margin:0 0 6px; font-size:14px; }
@@ -31,7 +41,11 @@
 
   /* ---- dark theme (synced with the shell via localStorage "aura-theme") ---- */
   body.dark { color-scheme: dark; background:#0b0d12; }
-  body.dark #hud, body.dark #panel { background:#12151ce6; border-color:#262c37; color:#e6eaf2; }
+  body.dark #hud, body.dark #panel, body.dark #filterbar {
+    background:#12151ce6; border-color:#262c37; color:#e6eaf2; }
+  body.dark #filterbar .chip { background:#1a1e27; border-color:#333c4a; color:#c4ccd9; }
+  body.dark #filterbar .chip:hover { background:#262c37; }
+  body.dark #filterbar .chip.on { background:#3b82f6; border-color:#3b82f6; color:#fff; }
   body.dark #hud .dim, body.dark #panel .row span:first-child { color:#98a2b3; }
   body.dark #panel .row { color:#c4ccd9; }
   body.dark .ar { background:#1d1910; border-color:#4a3b18; }
@@ -55,6 +69,7 @@
 <body>
 <div id="hud"><b>AURA</b> <span class="dim" id="conn">loading assets…</span><div class="dim" id="count"></div></div>
 <div id="panel"></div>
+<div id="filterbar"></div>
 <div id="approvals"></div>
 <script type="importmap">
 { "imports": {
@@ -554,7 +569,18 @@ function buildRobotFallback(color) {
 
 // ---------- agents ----------
 const agents = new Map();
-function agentColor(agentId) { return COLORS[agentId.split("-")[0]] ?? 0x64748b; }
+/** "agentic-workspace-3" → "agentic-workspace". Bots are named <project>-<n>. */
+function projectOf(agentId) { return String(agentId || "").replace(/-\d+$/, "") || "agent"; }
+// Colour identifies the *project*, not the individual, so a repo's bots read as
+// a team at a glance and the filter chips can share their colour. Hashed rather
+// than assigned in arrival order, so a bot keeps its colour across restarts.
+const PALETTE = Object.values(COLORS);
+function agentColor(agentId) {
+  const project = projectOf(agentId);
+  let hash = 0;
+  for (let i = 0; i < project.length; i++) hash = (hash * 31 + project.charCodeAt(i)) >>> 0;
+  return PALETTE[hash % PALETTE.length];
+}
 
 // True posed height of a skinned rig, from bone world positions.
 const _bonePos = new THREE.Vector3();
@@ -678,8 +704,7 @@ function ensureAgent(a) {
   }
   const prevStatus = entry.data?.status;
   entry.data = a;
-  // Offline agents leave the floor entirely instead of sinking through it.
-  entry.group.visible = a.status !== "offline";
+  applyVisibility(entry);
   const slot = slotFor(a, entry);
   entry.seat = slot.sit ? slot : null;
   entry.faceYaw = slot.yaw;
@@ -689,6 +714,91 @@ function ensureAgent(a) {
   }
   return entry;
 }
+// ---------- project filter ----------
+// One office, many repos. Rather than partition the floor, hide the crews you
+// aren't watching — the same move the kanban already makes with tags.
+const filterBar = document.getElementById("filterbar");
+let projectFilter = PARAMS.get("project") || null; // null = show every project
+
+/** Offline agents leave the floor; filtered-out projects are hidden with them. */
+function applyVisibility(entry) {
+  const live = entry.data?.status !== "offline";
+  const shown = !projectFilter || projectOf(entry.data?.agentId) === projectFilter;
+  entry.group.visible = live && shown;
+}
+
+function setProjectFilter(project) {
+  projectFilter = project;
+  for (const entry of agents.values()) applyVisibility(entry);
+  renderFilterBar();
+  updateCount();
+}
+
+function renderFilterBar() {
+  if (MINI) return; // the overview widget is too small to filter in
+  const counts = new Map();
+  for (const entry of agents.values()) {
+    if (entry.data?.status === "offline") continue;
+    const project = projectOf(entry.data?.agentId);
+    counts.set(project, (counts.get(project) ?? 0) + 1);
+  }
+  // A filtered-away project keeps its chip, otherwise clearing the filter means
+  // hunting for a control that just vanished.
+  if (projectFilter && !counts.has(projectFilter)) counts.set(projectFilter, 0);
+  // A single project needs no filter — chips would be decoration. But never
+  // hide the bar while a filter is on, or the last agent of the filtered
+  // project leaving strands you in an empty room with no way back.
+  if (counts.size < 2 && !projectFilter) {
+    filterBar.style.display = "none";
+    filterBar.replaceChildren();
+    return;
+  }
+
+  const chips = [["", "All", [...counts.values()].reduce((a, b) => a + b, 0)]];
+  for (const project of [...counts.keys()].sort()) chips.push([project, project, counts.get(project)]);
+
+  filterBar.replaceChildren(...chips.map(([value, label, n]) => {
+    const btn = document.createElement("button");
+    btn.className = "chip" + ((projectFilter ?? "") === value ? " on" : "");
+    btn.textContent = label;
+    const count = document.createElement("span");
+    count.className = "n";
+    count.textContent = String(n);
+    btn.appendChild(count);
+    btn.onclick = () => setProjectFilter(value || null);
+    return btn;
+  }));
+  filterBar.style.display = "flex";
+}
+
+function updateCount() {
+  const shown = [...agents.values()].filter((e) => e.group.visible).length;
+  countEl.textContent = projectFilter ? `${shown} agents in ${projectFilter}` : `${shown} agents`;
+}
+
+/**
+ * Despawns a bot's robot. Sessions end, and without this the floor fills with
+ * ghosts of finished work until someone reloads the page.
+ */
+function removeAgent(agentId) {
+  const entry = agents.get(agentId);
+  if (!entry) return;
+  entry.mixer?.stopAllAction();
+  scene.remove(entry.group);
+  entry.group.traverse((o) => {
+    if (!o.isMesh && !o.isSkinnedMesh && !o.isSprite) return;
+    o.geometry?.dispose?.();
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      m?.map?.dispose?.();
+      m?.dispose?.();
+    }
+  });
+  agents.delete(agentId);
+  cardsByAgent.delete(agentId);
+  renderFilterBar();
+  updateCount();
+}
+
 function setMode(entry, mode) {
   if (entry.mode === mode || !entry.mixer) { entry.mode = mode; return; }
   const from = entry.actions[entry.mode], to = entry.actions[mode];
@@ -1060,6 +1170,7 @@ function connect() {
       fetch("/api/board/cards").then((r) => r.json())
         .then((d) => d.cards.forEach(applyCard)).catch(() => {});
     } else if (msg.kind === "snapshot") { ensureAgent(msg.agent); refreshCardTags(); }
+    else if (msg.kind === "agent.removed") removeAgent(msg.agentId);
     else if (msg.kind === "card.upsert") applyCard(msg.card);
     else if (msg.kind === "card.removed") {
       for (const [aid, c] of cardsByAgent) if (c.id === msg.id) cardsByAgent.delete(aid);
@@ -1068,7 +1179,8 @@ function connect() {
     else if (msg.kind === "approval.pending") { approvals.set(msg.request.id, msg.request); renderApprovals(); }
     else if (msg.kind === "approval.resolved") { approvals.delete(msg.id); renderApprovals(); }
     else if (msg.kind === "space.updated" && !CAD) location.reload();
-    countEl.textContent = `${agents.size} agents`;
+    renderFilterBar();
+    updateCount();
   };
 }
 

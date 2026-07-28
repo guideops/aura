@@ -22,8 +22,11 @@ export const ClaudeHookPayload = z
 export type ClaudeHookPayload = z.infer<typeof ClaudeHookPayload>;
 
 export interface NormalizeContext {
-  /** Maps sessionId → stable display name (blue-agent, …). */
-  displayNameFor(sessionId: string): string;
+  /**
+   * Maps sessionId → display name (aura-1, …). cwd names the bot after its
+   * project and is only consulted the first time a session is seen.
+   */
+  displayNameFor(sessionId: string, cwd?: string): string;
 }
 
 const PROVIDER = "claude-code";
@@ -35,7 +38,7 @@ export function normalizeHookEvent(
   const parsed = ClaudeHookPayload.safeParse(raw);
   if (!parsed.success) return null;
   const p = parsed.data;
-  const agentId = ctx.displayNameFor(p.session_id);
+  const agentId = ctx.displayNameFor(p.session_id, p.cwd);
   const base = {
     id: ulid(),
     ts: Date.now(),
@@ -71,8 +74,10 @@ export function normalizeHookEvent(
       return {
         ...base,
         type: "tool.result",
+        // inputPreview is carried so a result can be matched back to the exact
+        // gate request it settles (GuardrailEngine.mirror), not just its tool.
         summary: `${p.tool_name ?? "tool"} done`,
-        data: { tool: p.tool_name ?? "" },
+        data: { tool: p.tool_name ?? "", inputPreview: previewInput(p.tool_input) },
       };
     case "SubagentStop":
       return {

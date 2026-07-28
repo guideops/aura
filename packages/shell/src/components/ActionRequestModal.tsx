@@ -3,13 +3,20 @@ import { api } from "../lib/api";
 import { agentColor, useShell } from "../lib/store";
 
 /**
- * Security-gate approval overlay (reference S2): the oldest pending request is
- * shown front and center; the agent stays blocked until the operator acts.
+ * Security-gate approval overlay (reference S2): the oldest *owned* request is
+ * shown front and center; its caller stays blocked until the operator acts.
+ *
+ * Observed (hook-origin) requests deliberately never reach this overlay. Claude
+ * Code has already put the same question in front of the operator at the
+ * terminal, so raising a second modal here asks twice and — once the terminal
+ * answer lands — leaves a stale prompt for a decision already made. Those
+ * settle themselves via the daemon's mirror and show up in Problems instead.
  */
 export function ActionRequestModal() {
   const approvals = useShell((s) => s.approvals);
   const [busy, setBusy] = useState(false);
-  const req = approvals[0];
+  const blocking = approvals.filter((a) => a.origin === "peer");
+  const req = blocking[0];
   if (!req) return null;
 
   const resolve = async (approved: boolean) => {
@@ -52,8 +59,8 @@ export function ActionRequestModal() {
             Approve &amp; Execute
           </button>
         </div>
-        {approvals.length > 1 && (
-          <div className="muted small-line">+{approvals.length - 1} more pending</div>
+        {blocking.length > 1 && (
+          <div className="muted small-line">+{blocking.length - 1} more pending</div>
         )}
       </div>
     </div>

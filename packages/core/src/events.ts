@@ -80,6 +80,12 @@ export const AgentSnapshot = z.object({
   }),
   /** Pending guardrail request id, when status === "blocked". */
   pendingApprovalId: z.string().nullable().default(null),
+  /**
+   * Desk primitive currently occupied. Desks are claimed while the agent is
+   * working and released the moment it goes idle or despawns, so a seat means
+   * "someone is working here" rather than "someone was assigned here".
+   */
+  desk: z.string().nullable().default(null),
 });
 export type AgentSnapshot = z.infer<typeof AgentSnapshot>;
 

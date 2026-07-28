@@ -39,6 +39,9 @@ export function BottomPanel() {
     () => events.filter((e) => e.type === "system.error" || e.type === "tool.deny"),
     [events],
   );
+  // Observed requests are listed in the tab but don't inflate the badge —
+  // nothing there is waiting on the operator.
+  const badgeCount = problems.length + approvals.filter((a) => a.origin === "peer").length;
 
   return (
     <section className="bottom-panel">
@@ -57,8 +60,8 @@ export function BottomPanel() {
             onClick={() => setTab(id)}
           >
             {label}
-            {id === "problems" && problems.length + approvals.length > 0 && (
-              <span className="problem-badge">{problems.length + approvals.length}</span>
+            {id === "problems" && badgeCount > 0 && (
+              <span className="problem-badge">{badgeCount}</span>
             )}
           </button>
         ))}
@@ -260,8 +263,13 @@ function ProblemsView({ problems }: { problems: AgentEvent[] }) {
     <div className="term-lines">
       {approvals.map((a) => (
         <div key={a.id} className="term-line">
-          <span className="term-level lv-warn">[APPROVAL]</span>
-          <span className="term-msg">{a.agentId}: {a.tool} — {a.inputPreview.slice(0, 80)}</span>
+          <span className={`term-level ${a.origin === "peer" ? "lv-warn" : "lv-info"}`}>
+            [{a.origin === "peer" ? "APPROVAL" : "OBSERVED"}]
+          </span>
+          <span className="term-msg">
+            {a.agentId}: {a.tool} — {a.inputPreview.slice(0, 80)}
+            {a.origin !== "peer" && <span className="muted"> · answered at the terminal</span>}
+          </span>
         </div>
       ))}
       {problems.slice(-100).reverse().map((e) => (

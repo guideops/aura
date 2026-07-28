@@ -22,12 +22,20 @@ export interface TranscriptWatcherOptions {
   ctx: NormalizeContext;
   /** Returns true when this session already streams via hooks. */
   isHookLive?: (sessionId: string) => boolean;
+  /**
+   * Path substrings whose transcripts are never ingested — automated session
+   * factories (memory observers, cron agents) that would otherwise fill the
+   * office with bots nobody is talking to.
+   */
+  ignore?: string[];
 }
 
 export class TranscriptWatcher {
   private watcher: FSWatcher | null = null;
   private offsets = new Map<string, number>();
   private started = new Set<string>(); // sessions we've emitted session.start for
+  /** True until chokidar finishes its first pass over existing files. */
+  private scanning = true;
 
   constructor(private options: TranscriptWatcherOptions) {}
 
@@ -38,7 +46,10 @@ export class TranscriptWatcher {
       awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 100 },
     });
     const onFile = (filePath: string) => this.consume(filePath);
-    this.watcher.on("add", onFile).on("change", onFile);
+    this.watcher
+      .on("add", onFile)
+      .on("change", onFile)
+      .on("ready", () => { this.scanning = false; });
   }
 
   async stop(): Promise<void> {
@@ -47,6 +58,7 @@ export class TranscriptWatcher {
   }
 
   private consume(filePath: string): void {
+    if (this.options.ignore?.some((needle) => filePath.includes(needle))) return;
     let fd: number;
     try {
       fd = fs.openSync(filePath, "r");
@@ -55,6 +67,14 @@ export class TranscriptWatcher {
     }
     try {
       const size = fs.fstatSync(fd).size;
+      // Files that already existed at startup are seeded to EOF instead of
+      // replayed: their sessions are history, and history must not spawn bots.
+      // A session still running gets a bot from its very next append; a session
+      // started after boot is new, so it is read from the top.
+      if (this.scanning && !this.offsets.has(filePath)) {
+        this.offsets.set(filePath, size);
+        return;
+      }
       const from = this.offsets.get(filePath) ?? 0;
       if (size <= from) return;
       const buf = Buffer.alloc(size - from);
@@ -103,7 +123,10 @@ export function parseTranscriptLine(
     return [];
   }
   const events: AgentEvent[] = [];
-  const agentId = ctx.displayNameFor(sessionId);
+  // Transcript lines carry the session's cwd, which names the bot after its
+  // project on first sight.
+  const cwd = typeof entry["cwd"] === "string" ? (entry["cwd"] as string) : undefined;
+  const agentId = ctx.displayNameFor(sessionId, cwd);
   const ts = typeof entry["timestamp"] === "string" ? Date.parse(entry["timestamp"] as string) || Date.now() : Date.now();
   const base = { provider: PROVIDER, sessionId, agentId, ts };
 
