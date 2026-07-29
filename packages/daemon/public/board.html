@@ -257,7 +257,9 @@ async function boot() {
   connect();
 }
 function connect() {
-  const ws = new WebSocket(`ws://${location.host}/ws`);
+  // Follow the page scheme — ws:// from an https:// page is blocked.
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onopen = () => { connEl.textContent = "live"; };
   ws.onclose = () => { connEl.textContent = "reconnecting…"; setTimeout(connect, 1500); };
   ws.onmessage = (m) => {

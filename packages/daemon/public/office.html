@@ -1158,7 +1158,11 @@ async function resolveApproval(id, approved) {
 const connEl = document.getElementById("conn");
 const countEl = document.getElementById("count");
 function connect() {
-  const ws = new WebSocket(`ws://${location.host}/ws`);
+  // Served over TLS on the tailnet, so the scheme has to follow the page —
+  // a plain ws:// from an https:// page is blocked as mixed content and the
+  // constructor throws synchronously.
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onopen = () => { connEl.textContent = "live"; };
   ws.onclose = () => { connEl.textContent = "reconnecting…"; setTimeout(connect, 1500); };
   ws.onmessage = (m) => {
@@ -1200,7 +1204,10 @@ window.__aura = {
 
 // ---------- boot ----------
 await Promise.all([buildOffice(), loadRobot()]);
-connect();
+// The render loop below must start even if live data can't. A throw here used
+// to abort the rest of the module, leaving a blank canvas rather than a static
+// office — the scene is still worth showing without agents in it.
+try { connect(); } catch (e) { console.error("live connect failed", e); connEl.textContent = "offline"; }
 
 // ---------- loop ----------
 const clock = new THREE.Clock();
