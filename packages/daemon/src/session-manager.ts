@@ -119,10 +119,13 @@ export class SessionManager {
       return a;
     })();
 
-    // shell:true so Windows resolves claude.cmd from PATH.
+    // shell:true so Windows resolves claude.cmd from PATH. The rawArgs seam
+    // spawns an explicit binary, where the shell only gets in the way: sh
+    // reparses the script argument's own quotes and parens and the child dies
+    // on a syntax error instead of running.
     const child = spawn(this.options.command ?? "claude", args, {
       cwd: input.cwd,
-      shell: true,
+      shell: !this.options.rawArgs,
       stdio: [usingStdin ? "pipe" : "ignore", "pipe", "pipe"],
       env: { ...process.env },
     });

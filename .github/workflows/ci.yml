@@ -14,9 +14,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      # No `version:` here on purpose — v4 refuses to start when it is set
+      # alongside `packageManager` in package.json, which is the source of truth.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 22
